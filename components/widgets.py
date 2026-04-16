@@ -14,14 +14,10 @@ def glow_text(text: str, size: int = Typography.H3, color: str = Colors.PRIMARY,
                    )))
 
 
-def gold_divider(opacity: float = 0.3) -> ft.Container:
+def primary_divider(opacity: float = 0.3) -> ft.Container:
     return ft.Container(
         height=1,
-        gradient=ft.LinearGradient(
-            colors=["#00000000", Colors.PRIMARY, "#00000000"],
-            begin=ft.Alignment.CENTER_LEFT,
-            end=ft.Alignment.CENTER_RIGHT,
-        ),
+        bgcolor=Colors.BORDER,
         opacity=opacity,
         margin=ft.Margin.symmetric(vertical=Spacing.SM),
     )
@@ -29,30 +25,30 @@ def gold_divider(opacity: float = 0.3) -> ft.Container:
 
 def glass_card(content, padding: int = Spacing.MD, radius: int = Radius.MD,
                border_color: str = Colors.BORDER, glow: bool = False,
-               on_click=None, expand=False) -> ft.Container:
-    shadow_color = "#00000066" if glow else "#00000044"
+               on_click=None, expand=False, bgcolor: str = Colors.BG_CARD) -> ft.Container:
+    shadow_color = "#00000015" if glow else "#00000008"
     return ft.Container(
         content=content,
         padding=padding,
         border_radius=radius,
-        bgcolor=Colors.BG_CARD,
+        bgcolor=bgcolor,
         border=ft.Border.all(1, border_color),
-        shadow=ft.BoxShadow(blur_radius=20, color=shadow_color, offset=ft.Offset(0, 4)),
+        shadow=ft.BoxShadow(blur_radius=15, color=shadow_color, offset=ft.Offset(0, 2)),
         on_click=on_click,
         animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
         expand=expand,
     )
 
 
-def gold_button(text: str, on_click=None, icon: str = None,
-                width: int = None, height: int = 48,
-                outlined: bool = False) -> ft.Container:
+def primary_button(text: str, on_click=None, icon: str = None,
+                   width: int = None, height: int = 48,
+                   outlined: bool = False) -> ft.Container:
     content_row = []
     if icon:
         content_row.append(ft.Icon(icon, size=18,
-                                   color=Colors.BG_DARKEST if not outlined else Colors.PRIMARY))
+                                   color=Colors.PRIMARY if outlined else Colors.TEXT_ON_PRIMARY))
     content_row.append(ft.Text(text, size=Typography.BODY, weight=Typography.SEMIBOLD,
-                                color=Colors.BG_DARKEST if not outlined else Colors.PRIMARY))
+                                color=Colors.PRIMARY if outlined else Colors.TEXT_ON_PRIMARY))
 
     return ft.Container(
         content=ft.Row(content_row, alignment=ft.MainAxisAlignment.CENTER,
@@ -60,11 +56,7 @@ def gold_button(text: str, on_click=None, icon: str = None,
         height=height,
         width=width,
         border_radius=Radius.MD,
-        gradient=None if outlined else ft.LinearGradient(
-            colors=[Colors.PRIMARY_LIGHT, Colors.PRIMARY],
-            begin=ft.Alignment.CENTER_LEFT,
-            end=ft.Alignment.CENTER_RIGHT,
-        ),
+        bgcolor=None if outlined else Colors.PRIMARY,
         border=ft.Border.all(1.5, Colors.PRIMARY) if outlined else None,
         on_click=on_click,
         animate=ft.Animation(150, ft.AnimationCurve.EASE_OUT),
@@ -98,63 +90,124 @@ def text_input(label: str, hint: str = "", password: bool = False,
 def priority_badge(priority: str) -> ft.Container:
     from core.theme import PRIORITY_MAP
     info = PRIORITY_MAP.get(priority, PRIORITY_MAP["medium"])
+    
+    # Use white background for all priorities
+    bg_color = Colors.BG_CARD
+    text_color = "#000000"  # Dark black text
+    border_color = Colors.BORDER
+    
     return ft.Container(
         content=ft.Row([
             ft.Text(info["icon"], size=10),
-            ft.Text(info["label"], size=Typography.TINY, color=Colors.TEXT_SECONDARY,
+            ft.Text(info["label"], size=Typography.TINY, color=text_color,
                     weight=Typography.SEMIBOLD),
         ], spacing=3, tight=True),
         padding=ft.Padding.symmetric(horizontal=8, vertical=3),
         border_radius=Radius.FULL,
-        border=ft.Border.all(1, Colors.BORDER),
-        bgcolor=Colors.BG_SURFACE,
+        border=ft.Border.all(1, border_color),
+        bgcolor=bg_color,
+        shadow=ft.BoxShadow(
+            spread_radius=1,
+            blur_radius=4,
+            color="#00000015",
+            offset=ft.Offset(0, 2),
+        ),
     )
 
 
 def category_badge(category: str) -> ft.Container:
     from core.theme import CATEGORY_MAP
     info = CATEGORY_MAP.get(category, CATEGORY_MAP["personal"])
+    
+    # Use white background for 'personal' category
+    if category == "personal":
+        bg_color = Colors.BG_CARD
+        text_color = "#000000"  # Dark black text
+        border_color = Colors.BORDER
+    else:
+        bg_color = info["color"] + "15"
+        text_color = info["color"]
+        border_color = info["color"] + "55"
+    
     return ft.Container(
         content=ft.Row([
             ft.Text(info["icon"], size=10),
-            ft.Text(info["label"], size=Typography.TINY, color=Colors.TEXT_SECONDARY,
+            ft.Text(info["label"], size=Typography.TINY, color=text_color,
                     weight=Typography.MEDIUM),
         ], spacing=3, tight=True),
         padding=ft.Padding.symmetric(horizontal=8, vertical=3),
         border_radius=Radius.FULL,
-        border=ft.Border.all(1, Colors.BORDER),
-        bgcolor=Colors.BG_SURFACE,
+        border=ft.Border.all(1, border_color),
+        bgcolor=bg_color,
+        shadow=ft.BoxShadow(
+            spread_radius=1,
+            blur_radius=4,
+            color="#00000015",
+            offset=ft.Offset(0, 2),
+        ),
     )
 
 
 def status_chip(status: str) -> ft.Container:
     from core.theme import STATUS_MAP
     info = STATUS_MAP.get(status, STATUS_MAP["todo"])
+    
+    # Use white background for all statuses
+    bg_color = Colors.BG_CARD
+    text_color = "#000000"  # Dark black text
+    border_color = Colors.BORDER
+    
     return ft.Container(
         content=ft.Row([
             ft.Text(info["icon"], size=10),
-            ft.Text(info["label"], size=Typography.TINY, color=Colors.TEXT_SECONDARY,
+            ft.Text(info["label"], size=Typography.TINY, color=text_color,
                     weight=Typography.MEDIUM),
         ], spacing=3, tight=True),
         padding=ft.Padding.symmetric(horizontal=8, vertical=3),
         border_radius=Radius.FULL,
-        bgcolor=Colors.BG_SURFACE,
+        border=ft.Border.all(1, border_color),
+        bgcolor=bg_color,
+        shadow=ft.BoxShadow(
+            spread_radius=1,
+            blur_radius=4,
+            color="#00000015",
+            offset=ft.Offset(0, 2),
+        ),
     )
 
 
-def avatar_circle(name: str, color: str = Colors.PRIMARY, size: int = 40) -> ft.Container:
-    initials = "".join(p[0].upper() for p in name.split()[:2]) if name else "?"
+def user_avatar(size: int = 40) -> ft.Container:
     return ft.Container(
-        content=ft.Text(initials, size=size // 2.8, color=Colors.BG_DARKEST,
-                        weight=Typography.BOLD),
+        content=ft.Image(src="avtdoumar.png", fit="cover"),
         width=size, height=size,
-        border_radius=Radius.FULL,
-        gradient=ft.LinearGradient(
-            colors=[color, Colors.PRIMARY_DARK],
-            begin=ft.Alignment.TOP_LEFT,
-            end=ft.Alignment.BOTTOM_RIGHT,
-        ),
+        border_radius=size // 2,
+        clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        bgcolor=Colors.PRIMARY,
         alignment=ft.Alignment.CENTER,
+    )
+
+
+def avatar_circle(name: str = "", color: str = Colors.PRIMARY, size: int = 40) -> ft.Container:
+    """Circular avatar với initials và màu nền tuỳ chọn."""
+    initial = (name or "?").strip()[0].upper()
+    font_size = max(10, size // 2 - 2)
+    return ft.Container(
+        content=ft.Text(
+            initial,
+            size=font_size,
+            color="#FFFFFF",
+            weight=Typography.BOLD,
+            text_align=ft.TextAlign.CENTER,
+        ),
+        width=size, height=size,
+        border_radius=size // 2,
+        bgcolor=color or Colors.PRIMARY,
+        alignment=ft.Alignment.CENTER,
+        shadow=ft.BoxShadow(
+            blur_radius=10,
+            color=(color or Colors.PRIMARY) + "44",
+            offset=ft.Offset(0, 3),
+        ),
     )
 
 
@@ -172,9 +225,9 @@ def snack(page: ft.Page, message: str, success: bool = True):
     page.snack_bar = ft.SnackBar(
         content=ft.Row([
             ft.Text(icon, size=16),
-            ft.Text(message, color=Colors.TEXT_PRIMARY, size=Typography.BODY),
+            ft.Text(message, color=Colors.TEXT_ON_PRIMARY, size=Typography.BODY),
         ], spacing=Spacing.SM),
-        bgcolor=Colors.BG_CARD,
+        bgcolor=color,
         behavior=ft.SnackBarBehavior.FLOATING,
         shape=ft.RoundedRectangleBorder(radius=Radius.MD),
         duration=3000,
@@ -211,18 +264,19 @@ def stat_card(value: str, label: str, icon: str, color: str,
                     content=ft.Text(icon, size=14),
                     width=28, height=28,
                     border_radius=Radius.MD,
-                    bgcolor="#505050",
+                    bgcolor=color + "22",
                     alignment=ft.Alignment.CENTER,
                 ),
                 ft.Column([
-                    ft.Text(value, size=Typography.BODY, color=Colors.PRIMARY, weight=Typography.BOLD),
-                    ft.Text(label, size=Typography.TINY, color=Colors.TEXT_MUTED),
+                    ft.Text(value, size=Typography.BODY, color=color, weight=Typography.BOLD),
+                    ft.Text(label, size=Typography.TINY, color=Colors.TEXT_SECONDARY),
                 ], spacing=0, tight=True),
             ], spacing=Spacing.XS),
         ], spacing=0, tight=True),
         padding=Spacing.XS,
         border_radius=Radius.MD,
         bgcolor=Colors.BG_CARD,
-        border=ft.Border.all(1, color + "33"),
+        border=ft.Border.all(1, Colors.BORDER),
+        shadow=ft.BoxShadow(blur_radius=5, color="#00000005", offset=ft.Offset(0, 1)),
         width=width,
     )

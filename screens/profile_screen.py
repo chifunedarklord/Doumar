@@ -3,7 +3,7 @@ TaskFlow - Profile / Account Screen
 """
 import flet as ft
 from core.theme import Colors, Typography, Spacing, Radius
-from core.models import Storage
+from core.services import TaskService
 from components.widgets import avatar_circle
 
 def build_profile_screen(page: ft.Page, user, on_navigate, on_logout=None):
@@ -15,7 +15,7 @@ def build_profile_screen(page: ft.Page, user, on_navigate, on_logout=None):
     profile_name_text = ft.Text(user.full_name or user.username, size=Typography.H2, color=Colors.TEXT_PRIMARY, weight=Typography.BOLD)
 
     # ── Stats summary ─────────────────────────────────────────
-    all_tasks   = Storage.get_tasks(user.id)
+    all_tasks   = TaskService.get_tasks(user.id)
     total       = len(all_tasks)
     done        = sum(1 for t in all_tasks if t.status == "done")
     in_prog     = sum(1 for t in all_tasks if t.status == "in_progress")
@@ -56,6 +56,11 @@ def build_profile_screen(page: ft.Page, user, on_navigate, on_logout=None):
         ], spacing=0, tight=True),
         padding=ft.Padding.symmetric(vertical=Spacing.MD, horizontal=Spacing.MD),
         border_radius=Radius.LG, bgcolor=Colors.BG_CARD, border=ft.border.all(1, Colors.BORDER),
+        shadow=ft.BoxShadow(
+            blur_radius=12,
+            color="#00000018",
+            offset=ft.Offset(0, 3),
+        ),
     )
 
     # ── Achievements ──────────────────────────────────────────
@@ -64,8 +69,8 @@ def build_profile_screen(page: ft.Page, user, on_navigate, on_logout=None):
             content=ft.Row([
                 ft.Container(
                     content=ft.Text(icon, size=24), width=48, height=48, border_radius=24,
-                    bgcolor=Colors.PRIMARY + ("22" if unlocked else "11"), alignment=ft.Alignment.CENTER,
-                    border=ft.Border.all(1, Colors.PRIMARY if unlocked else "transparent")
+                    bgcolor=Colors.PRIMARY_BG if unlocked else Colors.BG_SURFACE, alignment=ft.Alignment.CENTER,
+                    border=ft.Border.all(1, Colors.PRIMARY_BORDER if unlocked else "transparent")
                 ),
                 ft.Column([
                     ft.Text(title, size=Typography.BODY, color=Colors.TEXT_PRIMARY if unlocked else Colors.TEXT_MUTED, weight=Typography.SEMIBOLD),
@@ -74,7 +79,12 @@ def build_profile_screen(page: ft.Page, user, on_navigate, on_logout=None):
                 ft.Icon(ft.Icons.CHECK_CIRCLE, color=Colors.SUCCESS if unlocked else "transparent", size=16),
             ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
             padding=Spacing.MD, border_radius=Radius.MD, bgcolor=Colors.BG_SURFACE,
-            border=ft.Border.all(1, Colors.BORDER), opacity=1.0 if unlocked else 0.4
+            border=ft.Border.all(1, Colors.BORDER), opacity=1.0 if unlocked else 0.4,
+            shadow=ft.BoxShadow(
+                blur_radius=8,
+                color="#00000014",
+                offset=ft.Offset(0, 2),
+            ) if unlocked else None,
         )
 
     achievements = ft.Column([

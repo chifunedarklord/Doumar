@@ -5,9 +5,10 @@ Màn hình chính với tổng quan công việc, lịch trình hôm nay.
 import flet as ft
 from datetime import datetime, date, timedelta
 from core.theme import Colors, Typography, Spacing, Radius, CATEGORY_MAP, PRIORITY_MAP, STATUS_MAP
-from core.models import Storage, Task
+from core.models import Task
+from core.services import TaskService
 from components.widgets import (
-    glow_text, gold_divider, glass_card, gold_button,
+    glow_text, primary_divider, glass_card, primary_button,
     text_input, snack, avatar_circle, priority_badge,
     category_badge, status_chip, section_header, stat_card
 )
@@ -25,7 +26,7 @@ def build_dashboard(page: ft.Page, user, on_navigate):
       user        - User object
       on_navigate - callback(route_name)  # "tasks" | "calendar" | "report" | "profile"
     """
-    tasks = Storage.get_tasks(user.id)
+    tasks = TaskService.get_tasks(user.id)
     today_str = date.today().isoformat()
 
     # ── Stats ────────────────────────────────────────────────
@@ -138,13 +139,13 @@ def build_dashboard(page: ft.Page, user, on_navigate):
                         content=ft.Text(icon, size=22),
                         width=48, height=48,
                         border_radius=Radius.MD,
-                        bgcolor="#505050",
+                        bgcolor=Colors.PRIMARY_BG,
                         alignment=ft.Alignment.CENTER,
-                        border=ft.Border.all(1, Colors.BORDER),
+                        border=ft.Border.all(1, Colors.PRIMARY_BORDER),
                         shadow=ft.BoxShadow(
-                            blur_radius=8,
-                            color="#00000055",
-                            offset=ft.Offset(0, 2),
+                            blur_radius=10,
+                            color=Colors.PRIMARY_SHADOW,
+                            offset=ft.Offset(0, 3),
                         ),
                     ),
                     ft.Text(label, size=Typography.TINY, color=Colors.TEXT_SECONDARY,
@@ -186,7 +187,7 @@ def build_dashboard(page: ft.Page, user, on_navigate):
                                 color=Colors.TEXT_MUTED),
                         ft.Text("·", size=Typography.TINY, color=Colors.TEXT_MUTED),
                         ft.Text(task.due_date_display, size=Typography.TINY,
-                                color=Colors.TEXT_MUTED if not task.is_overdue else Colors.PRIMARY),
+                                color=Colors.ERROR if task.is_overdue else Colors.TEXT_MUTED),
                     ], spacing=4, tight=True),
                 ], spacing=2, expand=True, tight=True),
                 status_chip(task.status),
@@ -269,6 +270,11 @@ def build_dashboard(page: ft.Page, user, on_navigate):
         border_radius=Radius.LG,
         bgcolor=Colors.BG_CARD,
         border=ft.border.all(1, Colors.BORDER),
+        shadow=ft.BoxShadow(
+            blur_radius=12,
+            color="#00000018",
+            offset=ft.Offset(0, 3),
+        ),
     )
 
     # ── Upcoming high priority tasks ─────────────────────────
@@ -285,9 +291,14 @@ def build_dashboard(page: ft.Page, user, on_navigate):
                     content=ft.Text(cat["icon"], size=20),
                     width=44, height=44,
                     border_radius=Radius.MD,
-                    bgcolor="#505050",
+                    bgcolor=Colors.PRIMARY_BG,
                     alignment=ft.Alignment.CENTER,
-                    border=ft.Border.all(1, Colors.BORDER),
+                    border=ft.Border.all(1, Colors.PRIMARY_BORDER),
+                    shadow=ft.BoxShadow(
+                        blur_radius=8,
+                        color=Colors.PRIMARY_SHADOW,
+                        offset=ft.Offset(0, 2),
+                    ),
                 ),
                 ft.Container(
                     content=ft.Text(t.title, size=Typography.TINY,

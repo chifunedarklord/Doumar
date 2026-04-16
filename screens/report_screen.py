@@ -6,8 +6,9 @@ import flet as ft
 from datetime import date, datetime
 from collections import defaultdict
 from core.theme import Colors, Typography, Spacing, Radius, CATEGORY_MAP, PRIORITY_MAP
-from core.models import Storage, Task
-from components.widgets import gold_divider, stat_card, section_header
+from core.models import Task
+from core.services import TaskService
+from components.widgets import primary_divider, stat_card, section_header
 
 
 def build_report_screen(page: ft.Page, user, on_navigate):
@@ -15,13 +16,13 @@ def build_report_screen(page: ft.Page, user, on_navigate):
     sel_month = {"y": today.year, "m": today.month}
 
     def get_month_tasks(y, m):
-        tasks = Storage.get_tasks(user.id)
+        tasks = TaskService.get_tasks(user.id)
         return [t for t in tasks if t.created_at[:7] == f"{y:04d}-{m:02d}"]
 
     def build_content():
         y, m = sel_month["y"], sel_month["m"]
         tasks = get_month_tasks(y, m)
-        all_tasks = Storage.get_tasks(user.id)
+        all_tasks = TaskService.get_tasks(user.id)
 
         total       = len(tasks)
         done        = sum(1 for t in tasks if t.status == "done")
@@ -97,15 +98,21 @@ def build_report_screen(page: ft.Page, user, on_navigate):
                             value=completion / 100,
                             width=110, height=110,
                             stroke_width=10,
-                            color=Colors.PRIMARY,
+                            color=Colors.SUCCESS,
                             bgcolor=Colors.BG_SURFACE,
                         ),
                         alignment=ft.Alignment.CENTER,
+                        shadow=ft.BoxShadow(
+                            spread_radius=2,
+                            blur_radius=8,
+                            color="#00000020",
+                            offset=ft.Offset(0, 3),
+                        ),
                     ),
                     ft.Container(
                         content=ft.Column([
                             ft.Text(f"{completion}%", size=Typography.H2,
-                                    color=Colors.PRIMARY, weight=Typography.EXTRABOLD),
+                                    color=Colors.SUCCESS, weight=Typography.EXTRABOLD),
                             ft.Text("done", size=Typography.TINY, color=Colors.TEXT_MUTED),
                         ], horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                            spacing=0, tight=True),
@@ -131,6 +138,11 @@ def build_report_screen(page: ft.Page, user, on_navigate):
             border_radius=Radius.LG,
             bgcolor=Colors.BG_CARD,
             border=ft.border.all(1, Colors.BORDER),
+            shadow=ft.BoxShadow(
+                blur_radius=12,
+                color="#00000018",
+                offset=ft.Offset(0, 3),
+            ),
         )
 
         # ── Category bar chart ────────────────────────────────
@@ -176,6 +188,11 @@ def build_report_screen(page: ft.Page, user, on_navigate):
             border_radius=Radius.LG,
             bgcolor=Colors.BG_CARD,
             border=ft.border.all(1, Colors.BORDER),
+            shadow=ft.BoxShadow(
+                blur_radius=12,
+                color="#00000018",
+                offset=ft.Offset(0, 3),
+            ),
         )
 
         # ── Priority distribution ────────────────────────────
@@ -189,11 +206,16 @@ def build_report_screen(page: ft.Page, user, on_navigate):
                         content=ft.Text(info["icon"], size=24),
                         width=52, height=52,
                         border_radius=Radius.MD,
-                        bgcolor="#505050",
-                        border=ft.Border.all(1, Colors.BORDER),
+                        bgcolor=info.get("bg", Colors.BG_SURFACE),
+                        border=ft.Border.all(1, info.get("border_light", Colors.BORDER)),
                         alignment=ft.Alignment.CENTER,
+                        shadow=ft.BoxShadow(
+                            blur_radius=8,
+                            color=info.get("shadow", "#00000018"),
+                            offset=ft.Offset(0, 2),
+                        ),
                     ),
-                    ft.Text(f"{pct}%", size=Typography.H3, color=Colors.PRIMARY,
+                    ft.Text(f"{pct}%", size=Typography.H3, color=info["color"],
                             weight=Typography.BOLD, text_align=ft.TextAlign.CENTER),
                     ft.Text(info["label"], size=Typography.TINY,
                             color=Colors.TEXT_MUTED, text_align=ft.TextAlign.CENTER),
@@ -217,6 +239,11 @@ def build_report_screen(page: ft.Page, user, on_navigate):
             border_radius=Radius.LG,
             bgcolor=Colors.BG_CARD,
             border=ft.border.all(1, Colors.BORDER),
+            shadow=ft.BoxShadow(
+                blur_radius=12,
+                color="#00000018",
+                offset=ft.Offset(0, 3),
+            ),
         )
 
         # ── All-time summary ──────────────────────────────────
@@ -275,7 +302,7 @@ def build_report_screen(page: ft.Page, user, on_navigate):
                 end=ft.Alignment.BOTTOM_RIGHT,
             ),
             border=ft.Border.all(1, Colors.BORDER),
-            shadow=ft.BoxShadow(blur_radius=16, color="#00000066",
+            shadow=ft.BoxShadow(blur_radius=16, color="#0000001A",
                                 offset=ft.Offset(0, 4)),
         )
 

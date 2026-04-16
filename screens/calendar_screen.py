@@ -6,8 +6,8 @@ import flet as ft
 from datetime import date, timedelta
 import calendar
 from core.theme import Colors, Typography, Spacing, Radius, CATEGORY_MAP, PRIORITY_MAP
-from core.models import Storage
-from components.widgets import gold_divider, priority_badge, category_badge, status_chip
+from core.services import TaskService
+from components.widgets import primary_divider, priority_badge, category_badge, status_chip
 
 
 MONTHS_VI = ["","Tháng 1","Tháng 2","Tháng 3","Tháng 4","Tháng 5",
@@ -19,7 +19,7 @@ def build_calendar_screen(page: ft.Page, user, on_navigate):
     today = date.today()
     view_date = {"y": today.year, "m": today.month}
     selected_date = {"d": today}
-    tasks_all = Storage.get_tasks(user.id)
+    tasks_all = TaskService.get_tasks(user.id)
 
     # task lookup by date
     def tasks_for_date(d: date):
@@ -113,7 +113,7 @@ def build_calendar_screen(page: ft.Page, user, on_navigate):
                             width=30, height=30,
                             border_radius=Radius.FULL,
                             bgcolor=(Colors.PRIMARY if is_sel else
-                                     Colors.PRIMARY + "22" if is_today else "transparent"),
+                                     "#222563EB" if is_today else "transparent"),
                             alignment=ft.Alignment.CENTER,
                             border=ft.Border.all(1.5, Colors.PRIMARY) if is_today and not is_sel else None,
                         ),
@@ -163,6 +163,11 @@ def build_calendar_screen(page: ft.Page, user, on_navigate):
                 bgcolor=Colors.BG_CARD,
                 border=ft.border.all(1, Colors.BORDER),
                 margin=ft.Margin.only(bottom=Spacing.SM),
+                shadow=ft.BoxShadow(
+                    blur_radius=8,
+                    color="#00000015",
+                    offset=ft.Offset(0, 2),
+                ),
             )
 
         sel_header = ft.Row([
@@ -201,7 +206,7 @@ def build_calendar_screen(page: ft.Page, user, on_navigate):
                     nav,
                     ft.Container(height=Spacing.SM),
                     wd_row,
-                    gold_divider(0.15),
+                    primary_divider(0.15),
                     ft.Container(height=Spacing.SM),
                     grid,
                 ], spacing=Spacing.SM, tight=True),
@@ -210,7 +215,7 @@ def build_calendar_screen(page: ft.Page, user, on_navigate):
                 border_radius=Radius.LG,
                 bgcolor=Colors.BG_CARD,
                 border=ft.border.all(1, Colors.BORDER),
-                shadow=ft.BoxShadow(blur_radius=12, color="#00000055",
+                shadow=ft.BoxShadow(blur_radius=12, color="#00000015",
                                     offset=ft.Offset(0, 4)),
             ),
             ft.Container(height=Spacing.MD),
@@ -228,7 +233,7 @@ def build_calendar_screen(page: ft.Page, user, on_navigate):
 
     def refresh():
         tasks_all.clear()
-        tasks_all.extend(Storage.get_tasks(user.id))
+        tasks_all.extend(TaskService.get_tasks(user.id))
         main_col.controls = [build()]
         page.update()
 

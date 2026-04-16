@@ -3,8 +3,8 @@ TaskFlow - Settings Screen
 """
 import flet as ft
 from core.theme import Colors, Typography, Spacing, Radius
-from core.models import Storage, logout
-from components.widgets import gold_button, gold_divider, avatar_circle, snack
+from core.services import AuthService
+from components.widgets import primary_button, primary_divider, avatar_circle, snack
 
 AVATAR_COLORS = [
     "#F5A623","#8B5CF6","#06B6D4","#FB923C","#F43F5E",
@@ -15,9 +15,8 @@ def build_settings_screen(page: ft.Page, user, on_navigate, on_logout):
     sel_color = {"v": user.avatar_color}
 
     def save_profile(_):
-        user.full_name    = tf_name.value.strip() or user.username
-        user.avatar_color = sel_color["v"]
-        Storage.save_user(user)
+        new_name = tf_name.value.strip() or user.username
+        AuthService.update_profile(user, new_name, sel_color["v"])
         # Update UI avatar circle color
         avatar_placeholder.content = avatar_circle(user.full_name, user.avatar_color, 80)
         snack(page, "Đã cập nhật tài khoản ✓")
@@ -29,21 +28,15 @@ def build_settings_screen(page: ft.Page, user, on_navigate, on_logout):
         cfm = tf_cfm_pwd.value.strip()
         if not old or not new:
             snack(page, "Vui lòng nhập đầy đủ!", success=False); return
-        from core.models import hash_password
-        if user.password_hash != hash_password(old):
-            snack(page, "Mật khẩu cũ không đúng!", success=False); return
-        if new != cfm:
-            snack(page, "Mật khẩu mới không khớp!", success=False); return
-        if len(new) < 6:
-            snack(page, "Mật khẩu tối thiểu 6 ký tự!", success=False); return
-        user.password_hash = hash_password(new)
-        Storage.save_user(user)
+        ok, msg = AuthService.change_password(user, old, new, cfm)
+        if not ok:
+            snack(page, msg, success=False); return
         tf_old_pwd.value = tf_new_pwd.value = tf_cfm_pwd.value = ""
-        snack(page, "Đã đổi mật khẩu thành công ✓")
+        snack(page, msg)
         page.update()
 
     def do_logout(_):
-        logout()
+        AuthService.logout()
         on_logout()
 
     avatar_placeholder = ft.Container(
@@ -101,12 +94,17 @@ def build_settings_screen(page: ft.Page, user, on_navigate, on_logout):
                     ft.Text(icon, size=16),
                     ft.Text(title, size=Typography.H4, color=Colors.TEXT_PRIMARY, weight=Typography.SEMIBOLD),
                 ], spacing=Spacing.SM),
-                gold_divider(0.2),
+                primary_divider(0.2),
                 ft.Container(height=Spacing.SM),
                 content_widget,
             ], spacing=Spacing.SM, tight=True),
             padding=Spacing.MD, border_radius=Radius.LG,
             bgcolor=Colors.BG_CARD, border=ft.Border.all(1, Colors.BORDER),
+            shadow=ft.BoxShadow(
+                blur_radius=12,
+                color="#00000018",
+                offset=ft.Offset(0, 3),
+            ),
         )
 
     def info_row(icon, label, value):
@@ -151,14 +149,14 @@ def build_settings_screen(page: ft.Page, user, on_navigate, on_logout):
                         ft.Container(height=Spacing.MD),
                         tf_name,
                         ft.Container(height=Spacing.MD),
-                        gold_button("Lưu thay đổi", on_click=save_profile, icon=ft.Icons.SAVE_OUTLINED, height=44),
+                        primary_button("Lưu thay đổi", on_click=save_profile, icon=ft.Icons.SAVE_OUTLINED, height=44),
                     ], spacing=0, tight=True)
                 ),
                 ft.Container(height=Spacing.SM),
                 section_card("Đổi mật khẩu", "🔒",
                     ft.Column([
                         tf_old_pwd, ft.Container(height=Spacing.SM), tf_new_pwd, ft.Container(height=Spacing.SM), tf_cfm_pwd, ft.Container(height=Spacing.MD),
-                        gold_button("Đổi mật khẩu", on_click=change_password, icon=ft.Icons.LOCK_RESET_OUTLINED, outlined=True, height=44),
+                        primary_button("Đổi mật khẩu", on_click=change_password, icon=ft.Icons.LOCK_RESET_OUTLINED, outlined=True, height=44),
                     ], spacing=0, tight=True)
                 ),
                 ft.Container(height=Spacing.SM),
@@ -169,6 +167,11 @@ def build_settings_screen(page: ft.Page, user, on_navigate, on_logout):
                     ], alignment=ft.MainAxisAlignment.CENTER, spacing=Spacing.SM),
                     height=48, border_radius=Radius.MD, border=ft.Border.all(1.5, Colors.BORDER),
                     bgcolor=Colors.BG_SURFACE, on_click=do_logout, ink=True,
+                    shadow=ft.BoxShadow(
+                        blur_radius=8,
+                        color="#00000010",
+                        offset=ft.Offset(0, 2),
+                    ),
                 ),
                 ft.Container(height=Spacing.XXXL),
                 ft.Container(height=Spacing.XXXL),

@@ -6,9 +6,10 @@ import flet as ft
 import uuid
 from datetime import datetime, date
 from core.theme import Colors, Typography, Spacing, Radius, CATEGORY_MAP, PRIORITY_MAP, STATUS_MAP
-from core.models import Storage, Task
+from core.models import Task
+from core.services import TaskService
 from components.widgets import (
-    glow_text, gold_divider, glass_card, gold_button,
+    glow_text, primary_divider, glass_card, primary_button,
     text_input, snack, avatar_circle, priority_badge,
     category_badge, status_chip, section_header
 )
@@ -22,7 +23,7 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
     filter_pri    = {"v": "all"}
 
     def get_filtered_tasks():
-        tasks = Storage.get_tasks(user.id)
+        tasks = TaskService.get_tasks(user.id)
         q = search_val["v"].lower()
         if q:
             tasks = [t for t in tasks if q in t.title.lower() or q in t.description.lower()]
@@ -46,7 +47,7 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
     # ── Delete confirm ────────────────────────────────────────
     def delete_task(task_id: str):
         def confirm(_):
-            Storage.delete_task(task_id)
+            TaskService.delete_task(task_id)
             _del_bs[0].open = False
             page.update()
             refresh_list()
@@ -133,12 +134,7 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
         page.update()
 
     def toggle_done(task: Task):
-        task.status = "done" if task.status != "done" else "todo"
-        if task.status == "done":
-            task.completed_at = datetime.now().isoformat()
-        else:
-            task.completed_at = None
-        Storage.save_task(task)
+        TaskService.toggle_done(task)
         refresh_list()
 
     # ── Task card ─────────────────────────────────────────────
@@ -163,7 +159,7 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
                                 task.title,
                                 size=Typography.BODY,
                                 color=Colors.TEXT_MUTED if is_done else Colors.TEXT_PRIMARY,
-                                weight=Typography.SEMIBOLD,
+                                weight=Typography.BOLD,
                                 expand=True,
                                 max_lines=2,
                                 overflow=ft.TextOverflow.ELLIPSIS,
@@ -225,7 +221,7 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
             animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
             shadow=ft.BoxShadow(
                 blur_radius=8 if task.is_overdue else 4,
-                color=Colors.ERROR + "22" if task.is_overdue else "#00000033",
+                color="#22EF4444" if task.is_overdue else "#00000015",
                 offset=ft.Offset(0, 2),
             ),
         )
@@ -239,7 +235,7 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
                     ft.Text("Không có công việc nào", size=Typography.BODY,
                             color=Colors.TEXT_MUTED, text_align=ft.TextAlign.CENTER),
                     ft.Container(height=Spacing.MD),
-                    gold_button("Thêm công việc đầu tiên",
+                    primary_button("Thêm công việc đầu tiên",
                                 on_click=lambda _: on_navigate("task_edit"),
                                 icon=ft.Icons.ADD, height=44, width=200),
                 ], horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -261,9 +257,9 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
                     for i, (ck, ci) in enumerate(all_options.items()):
                         c = chips_list[i]
                         sel = (ck == k)
-                        c.bgcolor = "#3A3A3A" if sel else "transparent"
-                        c.border  = ft.border.all(1.5, "#888888") if sel else ft.border.all(1, Colors.BORDER)
-                        c.content.controls[1].color = Colors.TEXT_PRIMARY if sel else Colors.TEXT_MUTED
+                        c.bgcolor = Colors.PRIMARY if sel else "transparent"
+                        c.border  = ft.border.all(1.5, Colors.PRIMARY) if sel else ft.border.all(1, Colors.BORDER)
+                        c.content.controls[1].color = Colors.TEXT_ON_PRIMARY if sel else Colors.TEXT_MUTED
                     update_fn()
                 return _click
             selected = (key == sel_ref["v"])
@@ -271,13 +267,13 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
                 content=ft.Row([
                     ft.Text(info["icon"], size=10),
                     ft.Text(info["label"], size=Typography.TINY,
-                            color=Colors.TEXT_PRIMARY if selected else Colors.TEXT_MUTED),
+                            color=Colors.TEXT_ON_PRIMARY if selected else Colors.TEXT_MUTED),
                 ], spacing=4, tight=True),
                 padding=ft.Padding.symmetric(horizontal=10, vertical=5),
                 border_radius=Radius.FULL,
-                bgcolor="#3A3A3A" if selected else "transparent",
+                bgcolor=Colors.PRIMARY if selected else "transparent",
                 border=ft.Border.all(1.5 if selected else 1,
-                                      "#888888" if selected else Colors.BORDER),
+                                      Colors.PRIMARY if selected else Colors.BORDER),
             )
             chip.on_click = make_click(key, chips)
             chips.append(chip)
@@ -295,7 +291,7 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
         hint_text="🔍  Tìm kiếm công việc...",
         bgcolor=Colors.BG_INPUT,
         border_color=Colors.BORDER,
-        focused_border_color="#888888",
+        focused_border_color=Colors.PRIMARY,
         text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY, size=Typography.BODY),
         hint_style=ft.TextStyle(color=Colors.TEXT_MUTED),
         border_radius=Radius.FULL,
@@ -310,12 +306,12 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
             ft.Column([
                 ft.Text("Công việc", size=Typography.H2, color=Colors.TEXT_PRIMARY,
                         weight=Typography.BOLD),
-                ft.Text(f"{len(Storage.get_tasks(user.id))} công việc",
+                ft.Text(f"{len(TaskService.get_tasks(user.id))} công việc",
                         size=Typography.SMALL, color=Colors.TEXT_MUTED),
             ], spacing=2, tight=True),
             ft.Row([], expand=True),
             ft.Container(
-                content=gold_button("+ Thêm", on_click=lambda _: on_navigate("task_edit"),
+                content=primary_button("+ Thêm", on_click=lambda _: on_navigate("task_edit"),
                                     height=38, width=100),
             ),
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -334,8 +330,13 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
             sta_filter,
         ], spacing=0, tight=True),
         padding=ft.Padding.symmetric(horizontal=Spacing.MD, vertical=Spacing.SM),
-        bgcolor=Colors.BG_SURFACE,
+        bgcolor=Colors.BG_CARD,
         border=ft.Border.only(bottom=ft.BorderSide(1, Colors.BORDER)),
+        shadow=ft.BoxShadow(
+            blur_radius=6,
+            color="#00000015",
+            offset=ft.Offset(0, 2),
+        ),
     )
 
     task_list_col = ft.Column(build_task_list(), spacing=0, tight=True, ref=tasks_ref)

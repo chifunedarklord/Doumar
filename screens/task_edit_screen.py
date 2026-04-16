@@ -5,11 +5,12 @@ import flet as ft
 from datetime import datetime
 import uuid
 from core.theme import Colors, Typography, Spacing, Radius
-from core.models import Storage, Task
+from core.models import Task
+from core.services import TaskService
 from components.widgets import snack
 
 def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
-    from screens.tasks_screen import CATEGORY_MAP, PRIORITY_MAP, STATUS_MAP
+    from core.theme import CATEGORY_MAP, PRIORITY_MAP, STATUS_MAP
 
     is_edit = task is not None
     t = task or Task(
@@ -24,9 +25,9 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
             multiline=multiline,
             min_lines=min_l if multiline else None,
             max_lines=max_l if multiline else None,
-            bgcolor="#1A1A1A",
+            bgcolor=Colors.BG_CARD,
             border_color=Colors.BORDER,
-            focused_border_color="#888888",
+            focused_border_color=Colors.PRIMARY,
             text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY, size=Typography.BODY),
             label_style=ft.TextStyle(color=Colors.TEXT_MUTED, size=Typography.SMALL),
             hint_style=ft.TextStyle(color=Colors.TEXT_MUTED),
@@ -60,9 +61,9 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
         label="Tiêu đề *",
         value=t.title,
         hint_text="Nhập tiêu đề công việc...",
-        bgcolor="#1A1A1A",
+        bgcolor=Colors.BG_CARD,
         border_color=Colors.BORDER,
-        focused_border_color="#BBBBBB",
+        focused_border_color=Colors.PRIMARY,
         text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY,
                                 size=Typography.H4, weight=Typography.SEMIBOLD),
         label_style=ft.TextStyle(color=Colors.TEXT_MUTED, size=Typography.SMALL),
@@ -159,7 +160,7 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
     def _date_btn(icon, label, text_widget, picker):
         return ft.Container(
             content=ft.Row([
-                ft.Icon(icon, size=16, color=Colors.TEXT_MUTED),
+                ft.Icon(icon, size=16, color=Colors.TEXT_PRIMARY),
                 ft.Container(width=6),
                 ft.Column([
                     ft.Text(label, size=Typography.TINY, color=Colors.TEXT_MUTED),
@@ -168,11 +169,16 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
             ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
             padding=ft.padding.symmetric(horizontal=12, vertical=10),
             border_radius=Radius.MD,
-            bgcolor="#1A1A1A",
+            bgcolor=Colors.BG_CARD,
             border=ft.border.all(1, Colors.BORDER),
             on_click=lambda _: setattr(picker, 'open', True) or page.update(),
             expand=True,
             ink=True,
+            shadow=ft.BoxShadow(
+                blur_radius=6,
+                color="#00000012",
+                offset=ft.Offset(0, 2),
+            ),
         )
 
     btn_start = _date_btn(ft.Icons.PLAY_CIRCLE_OUTLINE, "Ngày bắt đầu", start_label, start_picker)
@@ -193,10 +199,10 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
                 for i, c in enumerate(chips):
                     sel = (i == idx)
                     info_i = options[keys_list[i]]
-                    c.bgcolor = "#2E2E2E" if sel else "transparent"
-                    c.border = ft.border.all(1.5 if sel else 1, "#888888" if sel else Colors.BORDER)
+                    c.bgcolor = Colors.PRIMARY if sel else "transparent"
+                    c.border = ft.border.all(1.5 if sel else 1, Colors.PRIMARY if sel else Colors.BORDER)
                     c.content.controls[0].color = info_i.get("color", Colors.TEXT_MUTED) if sel else Colors.TEXT_MUTED
-                    c.content.controls[1].color = Colors.TEXT_PRIMARY if sel else Colors.TEXT_MUTED
+                    c.content.controls[1].color = Colors.TEXT_ON_PRIMARY if sel else Colors.TEXT_MUTED
                 page.update()
             return _click
 
@@ -205,12 +211,12 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
             chip = ft.Container(
                 content=ft.Row([
                     ft.Text(info["icon"], size=12, color=info.get("color", Colors.TEXT_MUTED) if sel else Colors.TEXT_MUTED),
-                    ft.Text(info["label"], size=Typography.TINY, color=Colors.TEXT_PRIMARY if sel else Colors.TEXT_MUTED, weight=Typography.MEDIUM if sel else Typography.REGULAR),
+                    ft.Text(info["label"], size=Typography.TINY, color=Colors.TEXT_ON_PRIMARY if sel else Colors.TEXT_MUTED, weight=Typography.MEDIUM if sel else Typography.REGULAR),
                 ], spacing=5, tight=True),
                 padding=ft.padding.symmetric(horizontal=10, vertical=6),
                 border_radius=Radius.FULL,
-                bgcolor="#2E2E2E" if sel else "transparent",
-                border=ft.border.all(1.5 if sel else 1, "#888888" if sel else Colors.BORDER),
+                bgcolor=Colors.PRIMARY if sel else "transparent",
+                border=ft.border.all(1.5 if sel else 1, Colors.PRIMARY if sel else Colors.BORDER),
                 on_click=make_click(key, idx),
                 animate=ft.Animation(120, ft.AnimationCurve.EASE_OUT),
             )
@@ -228,20 +234,20 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
                 sel_ref["v"] = val
                 for i, c in enumerate(chips):
                     sel = (i == idx)
-                    c.bgcolor = "#2E2E2E" if sel else "transparent"
-                    c.border = ft.border.all(1.5 if sel else 1, "#888888" if sel else Colors.BORDER)
-                    c.content.color = Colors.TEXT_PRIMARY if sel else Colors.TEXT_MUTED
+                    c.bgcolor = Colors.PRIMARY if sel else "transparent"
+                    c.border = ft.border.all(1.5 if sel else 1, Colors.PRIMARY if sel else Colors.BORDER)
+                    c.content.color = Colors.TEXT_ON_PRIMARY if sel else Colors.TEXT_MUTED
                 page.update()
             return _click
 
         for idx, (val, label) in enumerate(options_list):
             sel = (val == sel_ref["v"])
             chip = ft.Container(
-                content=ft.Text(label, size=Typography.TINY, color=Colors.TEXT_PRIMARY if sel else Colors.TEXT_MUTED),
+                content=ft.Text(label, size=Typography.TINY, color=Colors.TEXT_ON_PRIMARY if sel else Colors.TEXT_MUTED),
                 padding=ft.padding.symmetric(horizontal=10, vertical=6),
                 border_radius=Radius.FULL,
-                bgcolor="#2E2E2E" if sel else "transparent",
-                border=ft.border.all(1.5 if sel else 1, "#888888" if sel else Colors.BORDER),
+                bgcolor=Colors.PRIMARY if sel else "transparent",
+                border=ft.border.all(1.5 if sel else 1, Colors.PRIMARY if sel else Colors.BORDER),
                 on_click=make_click(val, idx),
                 animate=ft.Animation(120, ft.AnimationCurve.EASE_OUT),
             )
@@ -286,7 +292,7 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
         t.notes            = tf_notes.value.strip()
         if t.status == "done" and not t.completed_at:
             t.completed_at = datetime.now().isoformat()
-        Storage.save_task(t)
+        TaskService.save_task(t)
         snack(page, "Đã lưu công việc ✓")
         on_navigate("tasks")
         

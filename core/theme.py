@@ -1,88 +1,88 @@
 """
 TaskFlow - Modern Mobile App Theme
-Clean, vibrant design with harmonious color palette
+Light, vibrant design with White and Blue (Primary) palette
 """
 
 # ─── COLOR PALETTE ────────────────────────────────────────────────────────────
 class Colors:
-    # Backgrounds - Dark gray theme
-    BG_DARKEST   = "#141414"  # Deepest background
-    BG_DARK      = "#1E1E1E"  # Secondary background
-    BG_CARD      = "#252525"  # Card background
-    BG_CARD_HOVER= "#2E2E2E"  # Card hover
-    BG_SURFACE   = "#2A2A2A"  # Surface elements
-    BG_INPUT     = "#1E1E1E"  # Input background
-    BG_OVERLAY   = "#14141499" # Overlay
+    # ── Backgrounds (Light Theme) ──
+    BG_DARKEST   = "#F3F4F6"  # Light gray background (app background)
+    BG_DARK      = "#F9FAFB"  # Slightly lighter background
+    BG_CARD      = "#FFFFFF"  # Pure white card background
+    BG_CARD_HOVER= "#F3F4F6"  # Card hover state
+    BG_SURFACE   = "#FFFFFF"  # Surface elements
+    BG_INPUT     = "#F9FAFB"  # Input background
+    BG_OVERLAY   = "#40000000" # Overlay (darkened for modal)
 
-    # Primary - Soft white/light gray (active accent)
-    PRIMARY      = "#E8E8E8"   # Near-white — active/highlight
-    PRIMARY_LIGHT = "#F5F5F5"  # White
-    PRIMARY_DARK = "#B0B0B0"   # Dimmed
+    # ── Primary (Blue) ──
+    PRIMARY      = "#2563EB"   # Tailwind Blue 600 - Main Brand Color
+    PRIMARY_LIGHT  = "#3B82F6"  # Tailwind Blue 500
+    PRIMARY_DARK   = "#1D4ED8"  # Tailwind Blue 700
+    PRIMARY_BG     = "#EFF6FF"  # Blue-50 - very light tint (icon backgrounds)
+    PRIMARY_BG_MED = "#DBEAFE"  # Blue-100 - slightly deeper tint
+    PRIMARY_BORDER = "#BFDBFE"  # Blue-200 - border around primary elements
+    PRIMARY_SHADOW = "#402563EB" # Blue shadow 25%
 
-    # Secondary - Medium gray
-    SECONDARY    = "#6B6B6B"   # Medium gray
-    SECONDARY_LIGHT = "#8A8A8A" # Light gray
+    # ── Secondary & Grays ──
+    SECONDARY    = "#6B7280"   # Light Gray for sub-elements
+    SECONDARY_LIGHT = "#9CA3AF"
 
-    # Accent warm — subtle warm tint for highlights
-    ACCENT_WARM  = "#C8C0B8"   # Warm off-white
-    ACCENT_WARM_LIGHT = "#DDD8D2" # Lighter warm
+    # ── Accent ──
+    ACCENT_WARM  = "#F3F4F6"
+    ACCENT_WARM_LIGHT = "#FFFFFF"
+    ACCENT_TEAL  = "#0D9488"   # Teal
+    ACCENT_CYAN  = "#0891B2"   # Cyan
+    ACCENT_BLUE  = "#3B82F6"   # Blue
+    ACCENT_GRAY  = "#9CA3AF"   # Neutral gray
 
-    # Supporting colors
-    ACCENT_TEAL  = "#7EAAB8"   # Muted teal (status: in progress)
-    ACCENT_CYAN  = "#7EAAB8"   # alias
-    ACCENT_BLUE  = "#6B8FA8"   # Muted blue
-    ACCENT_GRAY  = "#6B6B6B"   # Neutral gray
+    # ── Text Colors ──
+    TEXT_PRIMARY   = "#111827"  # Very dark gray (almost black)
+    TEXT_SECONDARY = "#4B5563"  # Medium-dark gray
+    TEXT_MUTED     = "#9CA3AF"  # Light gray placeholder
+    TEXT_ON_PRIMARY = "#FFFFFF" # White text on blue bg
 
-    # Text colors
-    TEXT_PRIMARY   = "#F0F0F0"  # Primary text
-    TEXT_SECONDARY = "#B8B8B8"  # Secondary text
-    TEXT_MUTED     = "#6B6B6B"  # Muted/placeholder
-    TEXT_ON_PRIMARY = "#141414" # Text on bright bg
+    # ── Status Colors ──
+    SUCCESS      = "#10B981"   # Emerald green
+    WARNING      = "#F59E0B"   # Amber/Orange
+    ERROR        = "#EF4444"   # Red
+    INFO         = "#3B82F6"   # Blue
 
-    # Status colors — visible but muted
-    SUCCESS      = "#6BAF7A"   # Muted green
-    WARNING      = "#C8A86B"   # Muted amber
-    ERROR        = "#B86B6B"   # Muted red
-    INFO         = "#6B8FA8"   # Muted blue
+    # ── Borders ──
+    BORDER       = "#E5E7EB"   # Very light gray border
+    BORDER_LIGHT = "#F3F4F6"   # Extremely light border
+    BORDER_GLOW  = "#93C5FD"   # Blue glow border
 
-    # Borders
-    BORDER       = "#333333"   # Subtle border
-    BORDER_LIGHT = "#444444"   # Light border
-    BORDER_GLOW  = "#555555"   # Glow border
+    # ── Priority colors ──
+    PRIORITY_HIGH   = "#EF4444"
+    PRIORITY_MEDIUM = "#F59E0B"
+    PRIORITY_LOW    = "#10B981"
 
-    # Priority colors — clearly distinct
-    PRIORITY_HIGH   = "#B86B6B" # Red-ish
-    PRIORITY_MEDIUM = "#C8A86B" # Amber-ish
-    PRIORITY_LOW    = "#6BAF7A" # Green-ish
+    # ── Category colors ──
+    CAT_WORK      = "#3B82F6"   # Blue
+    CAT_PERSONAL  = "#8B5CF6"   # Purple
+    CAT_HEALTH    = "#10B981"   # Green
+    CAT_FINANCE   = "#F59E0B"   # Amber
+    CAT_EDUCATION = "#06B6D4"   # Cyan
 
-    # Category colors — muted but distinct
-    CAT_WORK      = "#6B8FA8"   # Blue-gray
-    CAT_PERSONAL  = "#9A7AB8"   # Purple-gray
-    CAT_HEALTH    = "#6BAF7A"   # Green-gray
-    CAT_FINANCE   = "#C8A86B"   # Amber-gray
-    CAT_EDUCATION = "#7EAAB8"   # Teal-gray
-
-    # Aliases for compatibility
-    VIOLET       = "#9A7AB8"   # Muted violet
-    CYAN         = "#7EAAB8"   # Muted cyan
-    EMERALD      = "#6BAF7A"   # Muted green
-    ROSE         = "#B86B6B"   # Muted rose
-    AMBER        = "#C8A86B"   # Muted amber
-    GRAY         = "#6B6B6B"   # Neutral gray
+    # ── Aliases ──
+    VIOLET       = "#8B5CF6"
+    CYAN         = "#06B6D4"
+    EMERALD      = "#10B981"
+    ROSE         = "#F43F5E"
+    AMBER        = "#F59E0B"
+    GRAY         = "#6B7280"
 
 
 class Typography:
-    # Font sizes - Mobile optimized
-    DISPLAY  = 28  # Large headers
-    H1       = 24  # Screen titles
-    H2       = 20  # Section headers
-    H3       = 18  # Subsection headers
-    H4       = 16  # Card titles
-    BODY     = 14  # Body text
-    SMALL    = 13  # Secondary text
-    TINY     = 11  # Labels, badges
+    DISPLAY  = 28
+    H1       = 24
+    H2       = 20
+    H3       = 18
+    H4       = 16
+    BODY     = 14
+    SMALL    = 13
+    TINY     = 11
 
-    # Font weights
     THIN     = "w100"
     LIGHT    = "w300"
     REGULAR  = "w400"
@@ -93,7 +93,6 @@ class Typography:
 
 
 class Spacing:
-    # Mobile-friendly spacing
     XS  = 4
     SM  = 8
     MD  = 12
@@ -104,7 +103,6 @@ class Spacing:
 
 
 class Radius:
-    # Rounded corners for mobile
     SM  = 8
     MD  = 12
     LG  = 16
@@ -113,9 +111,12 @@ class Radius:
 
 
 PRIORITY_MAP = {
-    "high":   {"color": Colors.PRIORITY_HIGH,   "label": "Cao",   "icon": "🔴"},
-    "medium": {"color": Colors.PRIORITY_MEDIUM, "label": "Vừa",  "icon": "🟡"},
-    "low":    {"color": Colors.PRIORITY_LOW,    "label": "Thấp",  "icon": "🟢"},
+    "high":   {"color": Colors.PRIORITY_HIGH,   "label": "Cao",  "icon": "🔴",
+               "bg": "#FEE2E2", "border_light": "#FECACA", "shadow": "#30EF4444"},
+    "medium": {"color": Colors.PRIORITY_MEDIUM, "label": "Vừa", "icon": "🟡",
+               "bg": "#FEF3C7", "border_light": "#FDE68A", "shadow": "#30F59E0B"},
+    "low":    {"color": Colors.PRIORITY_LOW,    "label": "Thấp", "icon": "🟢",
+               "bg": "#D1FAE5", "border_light": "#A7F3D0", "shadow": "#3010B981"},
 }
 
 CATEGORY_MAP = {

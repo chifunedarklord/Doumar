@@ -4,9 +4,12 @@ Luxury dark theme - Clean & balanced
 """
 import flet as ft
 from core.theme import Colors, Typography, Spacing, Radius
-from core.models import login, register
+from core.services import AuthService
+
+login    = AuthService.login
+register = AuthService.register
 from components.widgets import (
-    text_input, snack, gold_button
+    text_input, snack, primary_button
 )
 
 
@@ -172,7 +175,7 @@ def build_auth_screen(page: ft.Page, on_login_success):
     ], spacing=12)
 
     # ── BUTTON ────────────────────────────
-    submit_btn = gold_button(
+    submit_btn = primary_button(
         "Xác nhận",
         on_click=handle_submit,
         width=200,
@@ -214,7 +217,7 @@ def build_auth_screen(page: ft.Page, on_login_success):
         border=ft.border.all(1, Colors.BORDER),
         shadow=ft.BoxShadow(
             blur_radius=30,
-            color="#00000088",
+            color="#10000000",
             offset=ft.Offset(0, 6)
         )
     )
@@ -228,7 +231,7 @@ def build_auth_screen(page: ft.Page, on_login_success):
             height=260,
             border_radius=200,
             gradient=ft.RadialGradient(
-                colors=[Colors.PRIMARY + "22", "#00000000"]
+                colors=["#222563EB", "transparent"]
             ),
             left=-80,
             top=-80
@@ -239,7 +242,7 @@ def build_auth_screen(page: ft.Page, on_login_success):
             height=220,
             border_radius=200,
             gradient=ft.RadialGradient(
-                colors=[Colors.VIOLET + "22", "#00000000"]
+                colors=["#228B5CF6", "transparent"]
             ),
             right=-60,
             bottom=80

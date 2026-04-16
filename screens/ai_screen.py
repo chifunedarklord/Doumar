@@ -6,6 +6,7 @@ import flet as ft
 import threading
 import time
 from core.theme import Colors, Typography, Spacing, Radius
+from components.widgets import user_avatar
 
 # ── Demo reply pool (rotates, no API needed) ───────────────────────────────
 _DEMO_REPLIES = [
@@ -47,9 +48,9 @@ _QUICK_PROMPTS = [
 
 
 def build_ai_screen(page: ft.Page, user, on_navigate):
-    from core.models import Storage
+    from core.services import TaskService
 
-    tasks   = Storage.get_tasks(user.id)
+    tasks   = TaskService.get_tasks(user.id)
     total   = len(tasks)
     done    = sum(1 for t in tasks if t.status == "done")
     pending = sum(1 for t in tasks if t.status == "todo")
@@ -89,10 +90,10 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
                 bottom_right=4 if is_user else 16,
                 bottom_left=16 if is_user else 4,
             ),
-            bgcolor=Colors.SECONDARY if is_user else Colors.BG_CARD,
+            bgcolor=Colors.PRIMARY if is_user else Colors.BG_CARD,
             border=ft.border.all(1, Colors.BORDER) if not is_user else None,
             shadow=ft.BoxShadow(
-                blur_radius=8, color="#00000033", offset=ft.Offset(0, 2)
+                blur_radius=8, color="#00000018", offset=ft.Offset(0, 2)
             ),
             animate=ft.Animation(300, ft.AnimationCurve.EASE_OUT),
         )
@@ -111,9 +112,6 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
             width=30, height=30,
             border_radius=15,
             clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-            bgcolor="#7C3AED",
-            alignment=ft.Alignment.CENTER,
-            shadow=ft.BoxShadow(blur_radius=8, color="#7C3AED55", offset=ft.Offset(0, 2))
         )
         return ft.Row(
             [
@@ -155,11 +153,9 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         content=ft.Row([
             ft.Container(
                 content=ft.Image(src="avtdoumar.png", fit="cover"),
-                width=26, height=26, border_radius=13,
+                width=26, height=26,
+                border_radius=13,
                 clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-                bgcolor="#7C3AED",
-                alignment=ft.Alignment.CENTER,
-                shadow=ft.BoxShadow(blur_radius=4, color="#7C3AED55", offset=ft.Offset(0, 2))
             ),
             ft.Container(
                 content=ft.Row([
@@ -208,7 +204,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         hint_style=ft.TextStyle(color=Colors.TEXT_MUTED),
         bgcolor=Colors.BG_INPUT,
         border_color=Colors.BORDER,
-        focused_border_color=Colors.SECONDARY,
+        focused_border_color=Colors.PRIMARY,
         text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY),
         border_radius=Radius.LG,
         cursor_color=Colors.PRIMARY,
@@ -226,7 +222,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
             time.sleep(1)
             tf.hint_text = "Nhắn gì đó cho AI…"
             tf.disabled = False
-            _add_bubble(is_user=True, image_src="doumar1.png")
+            _add_bubble(is_user=True, image_src="avtdoumar.png")
             page.update()
             _simulate_reply()
             
@@ -292,7 +288,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         width=46, height=46,
         border_radius=Radius.LG,
         gradient=ft.LinearGradient(
-            colors=["#7C3AED", "#2563EB"],
+            colors=[Colors.PRIMARY_LIGHT, Colors.PRIMARY],
             begin=ft.Alignment.TOP_LEFT,
             end=ft.Alignment.BOTTOM_RIGHT,
         ),
@@ -300,7 +296,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         on_click=_send,
         ink=True,
         shadow=ft.BoxShadow(
-            blur_radius=12, color="#7C3AED55", offset=ft.Offset(0, 3)
+            blur_radius=12, color=Colors.PRIMARY_SHADOW, offset=ft.Offset(0, 3)
         ),
         animate=ft.Animation(150, ft.AnimationCurve.EASE_OUT),
     )
@@ -384,9 +380,11 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
                 width=44, height=44,
                 border_radius=22,
                 clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-                bgcolor="#7C3AED",
-                alignment=ft.Alignment.CENTER,
-                shadow=ft.BoxShadow(blur_radius=16, color="#7C3AED55", offset=ft.Offset(0, 4))
+                shadow=ft.BoxShadow(
+                    blur_radius=10,
+                    color=Colors.PRIMARY_SHADOW,
+                    offset=ft.Offset(0, 3),
+                ),
             ),
             ft.Column([
                 ft.Text("Doumar", size=Typography.H3,
@@ -408,7 +406,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
                 padding=ft.Padding.symmetric(horizontal=8, vertical=3),
                 border_radius=Radius.FULL,
                 gradient=ft.LinearGradient(
-                    colors=["#7C3AED", "#2563EB"],
+                    colors=[Colors.PRIMARY_LIGHT, Colors.PRIMARY],
                     begin=ft.Alignment.CENTER_LEFT,
                     end=ft.Alignment.CENTER_RIGHT,
                 ),
@@ -418,6 +416,11 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         padding=ft.Padding.symmetric(horizontal=Spacing.MD, vertical=Spacing.MD),
         border=ft.Border(bottom=ft.BorderSide(1, Colors.BORDER)),
         bgcolor=Colors.BG_DARKEST,
+        shadow=ft.BoxShadow(
+            blur_radius=8,
+            color="#00000012",
+            offset=ft.Offset(0, 2),
+        ),
     )
 
     # ── Assemble ───────────────────────────────────────────────────────────

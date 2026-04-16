@@ -7,12 +7,12 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import flet as ft
 from core.theme import Colors, Typography, Spacing, Radius
-from core.models import get_current_user
+from core.services import AuthService
 
 
 def main(page: ft.Page):
     page.title        = "TaskFlow"
-    page.bgcolor      = Colors.BG_DARKEST
+    page.bgcolor      = "#FFFFFF"
     page.theme_mode   = ft.ThemeMode.DARK
     page.window.width = 420
     page.window.height = 820
@@ -27,7 +27,7 @@ def main(page: ft.Page):
     page.spacing      = 0
 
     # ── App state ─────────────────────────────────────────────
-    current_user = {"u": get_current_user()}
+    current_user = {"u": AuthService.get_current_user()}
     active_tab   = {"t": "dashboard"}
 
     # ── Navigation bar ────────────────────────────────────────
@@ -108,9 +108,9 @@ def main(page: ft.Page):
             ], spacing=0,
                vertical_alignment=ft.CrossAxisAlignment.END),
             height=64,
-            bgcolor=Colors.BG_CARD,
+            bgcolor="#FFFFFF",
             border=ft.Border(top=ft.BorderSide(1, Colors.BORDER)),
-            shadow=ft.BoxShadow(blur_radius=24, color="#00000055",
+            shadow=ft.BoxShadow(blur_radius=16, color="#20000000",
                                 offset=ft.Offset(0, -4)),
             clip_behavior=ft.ClipBehavior.NONE,
         )
@@ -205,43 +205,32 @@ def main(page: ft.Page):
             time.sleep(10)
             if current_user["u"]:
                 try:
-                    from core.storage import Storage
-                    tasks = Storage.get_tasks(current_user["u"].id)
-                    now = datetime.now()
-                    curr_date = now.strftime("%Y-%m-%d")
-                    curr_time = now.strftime("%H:%M")
-                    
-                    for t in tasks:
-                        if t.status != "done" and t.reminder_minutes > 0:
-                            tdate = t.start_date or t.due_date
-                            ttime = t.due_time
-                            if tdate == curr_date and ttime == curr_time:
-                                if t.id not in _notified:
-                                    _notified.add(t.id)
-                                    try:
-                                        from plyer import notification
-                                        notification.notify(
-                                            title="TaskFlow Nhắc Việc",
-                                            message=f"Đến giờ làm: {t.title}",
-                                            app_name="TaskFlow",
-                                            timeout=5
-                                        )
-                                    except Exception as e:
-                                        print("Plyer Error:", e)
-                                        
-                                    try:
-                                        def show_snack(task_title):
-                                            sb = ft.SnackBar(
-                                                content=ft.Text(f"🔔 Nhắc nhở tới hạn: {task_title}", color="white"),
-                                                bgcolor="#F59E0B"
-                                            )
-                                            page.overlay.append(sb)
-                                            sb.open = True
-                                            page.update()
-                                        page.run_task(lambda t_title=t.title: show_snack(t_title))
-                                    except Exception as e:
-                                        pass
-                except Exception as e:
+                    from core.services import TaskService
+                    due_tasks = TaskService.check_reminders(current_user["u"].id, _notified)
+                    for t in due_tasks:
+                        try:
+                            from plyer import notification
+                            notification.notify(
+                                title="TaskFlow Nhắc Việc",
+                                message=f"Đến giờ làm: {t.title}",
+                                app_name="TaskFlow",
+                                timeout=5
+                            )
+                        except Exception as e:
+                            print("Plyer Error:", e)
+                        try:
+                            def show_snack(task_title):
+                                sb = ft.SnackBar(
+                                    content=ft.Text(f"🔔 Nhắc nhở tới hạn: {task_title}", color="white"),
+                                    bgcolor="#F59E0B"
+                                )
+                                page.overlay.append(sb)
+                                sb.open = True
+                                page.update()
+                            page.run_task(lambda t_title=t.title: show_snack(t_title))
+                        except Exception:
+                            pass
+                except Exception:
                     pass
 
     threading.Thread(target=_notification_worker, daemon=True).start()
