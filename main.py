@@ -12,7 +12,9 @@ from core.services import AuthService
 
 def main(page: ft.Page):
     page.title        = "TaskFlow"
-    page.bgcolor      = "#FFFFFF"
+    page.bgcolor      = "transparent"
+    page.window.frameless = True
+    page.window.bgcolor = "transparent"
     page.theme_mode   = ft.ThemeMode.DARK
     page.window.width = 420
     page.window.height = 820
@@ -177,7 +179,7 @@ def main(page: ft.Page):
             show_main_app()
 
         page.controls.clear()
-        page.controls.append(build_auth_screen(page, on_login))
+        page.controls.append(wrap_in_phone(build_auth_screen(page, on_login), include_navbar=False))
         page.update()
 
     def logout_user():
@@ -185,13 +187,55 @@ def main(page: ft.Page):
         active_tab["t"] = "dashboard"
         show_auth()
 
+    def build_status_bar():
+        from datetime import datetime
+        current_time = datetime.now().strftime("%H:%M")
+        return ft.WindowDragArea(
+            content=ft.Container(
+                content=ft.Row([
+                    ft.Text(current_time, size=12, weight=ft.FontWeight.BOLD, color=Colors.TEXT_PRIMARY),
+                    ft.Row([
+                        ft.Icon(ft.Icons.WIFI, size=14, color=Colors.TEXT_PRIMARY),
+                        ft.Icon(ft.Icons.BATTERY_FULL, size=14, color=Colors.TEXT_PRIMARY),
+                    ], spacing=4),
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                padding=ft.padding.only(left=24, right=20, top=14, bottom=8),
+                bgcolor="transparent",
+            )
+        )
+
+    def wrap_in_phone(content_control, include_navbar=False):
+        status_bar = build_status_bar()
+        home_indicator = ft.Container(
+            content=ft.Container(width=120, height=4, border_radius=2, bgcolor=Colors.BORDER),
+            alignment=ft.Alignment.CENTER,
+            padding=ft.padding.only(bottom=8, top=4),
+            bgcolor="transparent",
+        )
+        
+        controls = [
+            status_bar, 
+            ft.Container(content=content_control, expand=True)
+        ]
+        if include_navbar:
+            controls.append(ft.Container(ref=nav_bar_ref, content=build_nav_bar()))
+            
+        controls.append(home_indicator)
+        
+        return ft.Container(
+            content=ft.Column(controls, spacing=0, tight=True, expand=True),
+            expand=True,
+            bgcolor="#FFFFFF",
+            border_radius=36,
+            border=ft.border.all(8, "#1F2937"),
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+            shadow=ft.BoxShadow(blur_radius=24, color="#30000000", offset=ft.Offset(0, 10))
+        )
+
     def show_main_app():
         page.controls.clear()
         page.controls.append(
-            ft.Column([
-                ft.Container(expand=True, content=screen_area),
-                ft.Container(ref=nav_bar_ref, content=build_nav_bar()),
-            ], spacing=0, expand=True)
+            wrap_in_phone(screen_area, include_navbar=True)
         )
         navigate("dashboard")
 
