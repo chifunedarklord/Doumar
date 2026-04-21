@@ -105,7 +105,7 @@ def build_dashboard(page: ft.Page, user, on_navigate):
     overview_card = ft.Container(
         content=ft.Row([
             ft.Column([
-                ft.Text("Tổng quan hôm nay", size=Typography.H4,
+                ft.Text("Tổng quan công việc", size=Typography.H4,
                         color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
                 ft.Container(height=2),
                 ft.Row([
@@ -315,12 +315,12 @@ def build_dashboard(page: ft.Page, user, on_navigate):
         )
 
     urgent_section = ft.Column([
-        section_header("🔥 Ưu tiên cao", f"{len(upcoming)} công việc cần chú ý",
+        section_header("🔥 Công việc ưu tiên", f"{len(upcoming)} công việc cần chú ý",
                        "Xem tất cả", lambda _: on_navigate("tasks")),
         ft.Container(height=Spacing.SM),
         ft.Row([upcoming_chip(t) for t in upcoming], spacing=0,
                scroll=ft.ScrollMode.AUTO) if upcoming
-        else ft.Text("Không có công việc ưu tiên cao.",
+        else ft.Text("Không có công việc ưu tiên.",
                      size=Typography.SMALL, color=Colors.TEXT_MUTED),
     ], spacing=0, tight=True)
 

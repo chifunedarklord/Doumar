@@ -26,7 +26,12 @@ class AuthService:
     @staticmethod
     def verify_password(password: str, hashed: str) -> bool:
         """Verify password against bcrypt hash."""
-        return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+        try:
+            return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+        except ValueError:
+            # Fallback for old SHA-256 hashes
+            import hashlib
+            return hashlib.sha256(password.encode('utf-8')).hexdigest() == hashed
 
     @classmethod
     def register(

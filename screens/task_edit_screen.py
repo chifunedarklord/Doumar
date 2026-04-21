@@ -321,7 +321,6 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
             _section_label("🏷️  PHÂN LOẠI"),
             ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.FOLDER_OUTLINED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text("Danh mục", size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), cat_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
             ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.FLAG_OUTLINED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text("Độ ưu tiên", size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), pri_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
-            ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.CIRCLE_OUTLINED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text("Trạng thái", size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), sta_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
             _div(),
             
             _section_label("⚙️  CÀI ĐẶT"),
