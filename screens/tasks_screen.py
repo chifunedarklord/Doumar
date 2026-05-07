@@ -286,7 +286,7 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
     pri_filter = filter_row("Ưu tiên",    PRIORITY_MAP, filter_pri, refresh_list)
     sta_filter = filter_row("Trạng thái", STATUS_MAP,   filter_status, refresh_list)
 
-    # ── Search bar ────────────────────────────────────────────
+    # ── Search & Filter Panel ─────────────────────────────────
     search_field = ft.TextField(
         hint_text="🔍  Tìm kiếm công việc...",
         bgcolor=Colors.BG_INPUT,
@@ -296,8 +296,78 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
         hint_style=ft.TextStyle(color=Colors.TEXT_MUTED),
         border_radius=Radius.FULL,
         height=44,
+        expand=True,
         cursor_color=Colors.TEXT_PRIMARY,
         on_change=lambda e: [search_val.update({"v": e.control.value}), refresh_list()],
+    )
+
+    def close_filter_sheet(_):
+        filter_bs.open = False
+        page.update()
+
+    filter_sheet_content = ft.Column([
+        ft.Container(
+            content=ft.Container(width=40, height=4, border_radius=Radius.FULL,
+                                 bgcolor="#444444"),
+            alignment=ft.Alignment.CENTER,
+            padding=ft.padding.only(top=12, bottom=8),
+        ),
+        ft.Container(
+            content=ft.Column([
+                ft.Text("Lọc công việc", size=Typography.H3,
+                        color=Colors.TEXT_PRIMARY, weight=Typography.BOLD,
+                        text_align=ft.TextAlign.CENTER),
+                ft.Container(height=Spacing.MD),
+                cat_filter,
+                ft.Container(height=Spacing.SM),
+                pri_filter,
+                ft.Container(height=Spacing.SM),
+                sta_filter,
+                ft.Container(height=Spacing.XL),
+                ft.Container(
+                    content=primary_button("Xong", on_click=close_filter_sheet, width=200),
+                    alignment=ft.Alignment.CENTER
+                )
+            ], horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+               spacing=0, tight=True),
+            padding=ft.padding.only(left=Spacing.LG, right=Spacing.LG, bottom=Spacing.LG),
+        ),
+    ], spacing=0, tight=True)
+
+    filter_bs = ft.BottomSheet(
+        content=ft.Container(
+            content=filter_sheet_content,
+            bgcolor=Colors.BG_CARD,
+            border_radius=ft.border_radius.only(
+                top_left=Radius.XL, top_right=Radius.XL,
+            ),
+            padding=0,
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        ),
+        open=False,
+        draggable=True,
+        use_safe_area=True,
+    )
+    page.overlay.append(filter_bs)
+
+    def open_filter_sheet(e):
+        filter_bs.open = True
+        page.update()
+
+    filter_btn = ft.Container(
+        content=ft.IconButton(
+            icon=ft.Icons.TUNE,
+            icon_color=Colors.TEXT_PRIMARY,
+            icon_size=20,
+            on_click=open_filter_sheet,
+            tooltip="Bộ lọc",
+        ),
+        bgcolor=Colors.BG_INPUT,
+        border_radius=Radius.FULL,
+        border=ft.Border.all(1, Colors.BORDER),
+        height=44,
+        width=44,
+        alignment=ft.Alignment.CENTER,
     )
 
     # ── Header ────────────────────────────────────────────────
@@ -320,15 +390,10 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
     )
 
     filter_panel = ft.Container(
-        content=ft.Column([
+        content=ft.Row([
             search_field,
-            ft.Container(height=Spacing.SM),
-            cat_filter,
-            ft.Container(height=Spacing.XS),
-            pri_filter,
-            ft.Container(height=Spacing.XS),
-            sta_filter,
-        ], spacing=0, tight=True),
+            filter_btn,
+        ], spacing=Spacing.SM),
         padding=ft.Padding.symmetric(horizontal=Spacing.MD, vertical=Spacing.SM),
         bgcolor=Colors.BG_CARD,
         border=ft.Border.only(bottom=ft.BorderSide(1, Colors.BORDER)),

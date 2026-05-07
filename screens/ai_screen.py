@@ -48,7 +48,7 @@ _QUICK_PROMPTS = [
 
 
 def build_ai_screen(page: ft.Page, user, on_navigate):
-    from core.services import TaskService
+    from core.services import TaskService, ChatService
 
     tasks   = TaskService.get_tasks(user.id)
     total   = len(tasks)
@@ -66,7 +66,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         auto_scroll=True,
     )
 
-    def _bubble(text: str = None, is_user: bool = False, audio: bool = False, image_src: str = None) -> ft.Row:
+    def _bubble(text: str = None, is_user: bool = False, audio: bool = False, image_src: str = None, animate: bool = True) -> ft.Row:
         if image_src:
             content = ft.Image(src=image_src, height=200, fit="contain", border_radius=8)
         elif audio:
@@ -95,7 +95,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
             shadow=ft.BoxShadow(
                 blur_radius=8, color="#00000018", offset=ft.Offset(0, 2)
             ),
-            animate=ft.Animation(300, ft.AnimationCurve.EASE_OUT),
+            animate=ft.Animation(300, ft.AnimationCurve.EASE_OUT) if animate else None,
         )
 
         if is_user:
@@ -133,8 +133,8 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         except Exception:
             pass
 
-    def _add_bubble(text: str = None, is_user: bool = False, audio: bool = False, image_src: str = None):
-        bubble = _bubble(text, is_user, audio, image_src)
+    def _add_bubble(text: str = None, is_user: bool = False, audio: bool = False, image_src: str = None, animate: bool = True):
+        bubble = _bubble(text, is_user, audio, image_src, animate)
         has_typing = _typing in chat_lv.controls
         
         if has_typing:
@@ -146,7 +146,8 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
             chat_lv.controls.append(_typing)
             
         page.update()
-        _scroll_down()
+        if animate:
+            _scroll_down()
 
     # ── Typing indicator ───────────────────────────────────────────────────
     _typing = ft.Container(
@@ -185,17 +186,22 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         visible=False,
     )
 
-    # ── Welcome message ────────────────────────────────────────────────────
-    name = user.full_name or user.username
-    _add_bubble(
-        f"Xin chào {name}! 👋\n\n"
-        f"Tôi là Doumar trợ lý của bạn. Hiện bạn có:\n"
-        f"• {total} công việc tổng cộng\n"
-        f"• ✅ {done} hoàn thành ({pct}%)\n"
-        f"• 📋 {pending} đang chờ\n\n"
-        "Hỏi tôi bất cứ điều gì về quản lý công việc và năng suất!",
-        is_user=False,
-    )
+    # ── History Load / Welcome message ────────────────────────────────────────────────────
+    history = ChatService.get_history(user.id)
+    if not history:
+        name = user.full_name or user.username
+        welcome_text = (f"Xin chào {name}! 👋\n\n"
+                        f"Tôi là Doumar trợ lý của bạn. Hiện bạn có:\n"
+                        f"• {total} công việc tổng cộng\n"
+                        f"• ✅ {done} hoàn thành ({pct}%)\n"
+                        f"• 📋 {pending} đang chờ\n\n"
+                        "Hỏi tôi bất cứ điều gì về quản lý công việc và năng suất!")
+        _add_bubble(welcome_text, is_user=False, animate=False)
+        ChatService.add_message(user.id, "model", welcome_text)
+    else:
+        for msg in history:
+            _add_bubble(msg["text"], is_user=(msg["role"] == "user"), animate=False)
+
     chat_lv.controls.append(_typing)
 
     # ── Input & send ───────────────────────────────────────────────────────
@@ -212,21 +218,39 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         on_submit=lambda e: _send(e),
     )
 
-    # ── Upload Image (Giả lập để không phụ thuộc phiên bản Flet Native) ──
+    # ── Upload Image (Tkinter Fallback) ──────────────────────────────
+    from components.widgets import snack
+
     def _pick(e):
-        tf.hint_text = "Đang tải ảnh lên..."
+        tf.hint_text = "Đang chọn Ảnh..."
         tf.disabled = True
         page.update()
         
-        def _simulate_pick():
-            time.sleep(1)
+        def _run():
+            try:
+                import tkinter as tk
+                from tkinter import filedialog
+                root = tk.Tk()
+                root.attributes('-topmost', True)
+                root.withdraw()
+                file_path = filedialog.askopenfilename(
+                    title="Chọn ảnh", 
+                    filetypes=[("Image files", "*.jpg;*.jpeg;*.png;*.bmp")]
+                )
+                root.destroy()
+            except Exception:
+                file_path = None
+                
             tf.hint_text = "Nhắn gì đó cho AI…"
             tf.disabled = False
-            _add_bubble(is_user=True, image_src="avtdoumar.png")
             page.update()
-            _simulate_reply()
             
-        threading.Thread(target=_simulate_pick, daemon=True).start()
+            if file_path:
+                _add_bubble(is_user=True, image_src=file_path)
+                tf.value = "Hãy phân tích hình ảnh này và tạo task giúp tôi."
+                _send(None, image_path=file_path)
+                
+        threading.Thread(target=_run, daemon=True).start()
 
     # ── State for recording ──
     _record_state = {"is_recording": False}
@@ -260,28 +284,33 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         on_click=_toggle_record
     )
 
-    def _simulate_reply():
+    def _simulate_reply(message="", image_path=None):
         _typing.visible = True
         page.update()
         _scroll_down()
 
         def _reply():
-            time.sleep(0.9)
-            reply = _DEMO_REPLIES[_idx["i"] % len(_DEMO_REPLIES)]
-            _idx["i"] += 1
+            from utils.ai_helper import get_ai_reply
+            reply = get_ai_reply(user.settings, message, user.id, image_path)
+
             _typing.visible = False
             _add_bubble(text=reply, is_user=False)
+            ChatService.add_message(user.id, "model", reply)
             page.update()
 
         threading.Thread(target=_reply, daemon=True).start()
 
-    def _send(_):
+    def _send(_, image_path=None):
         text = tf.value.strip()
-        if not text:
+        if not text and not image_path:
             return
         tf.value = ""
-        _add_bubble(text=text, is_user=True)
-        _simulate_reply()
+        if text and not image_path:
+            _add_bubble(text=text, is_user=True)
+            ChatService.add_message(user.id, "user", text)
+        elif image_path:
+            ChatService.add_message(user.id, "user", f"[Đã gửi hình ảnh] {text}")
+        _simulate_reply(message=text, image_path=image_path)
 
     send_btn = ft.Container(
         content=ft.Icon(ft.Icons.SEND_ROUNDED, color="white", size=20),
@@ -329,16 +358,31 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
     )
 
     # ── History Panel ──────────────────────────────────────────────────────
+    def _clear_chat(_):
+        ChatService.clear_history(user.id)
+        chat_lv.controls.clear()
+        chat_lv.controls.append(_typing)
+        name = user.full_name or user.username
+        welcome_text = "Lịch sử đã được xóa. Tôi có thể giúp gì cho bạn?"
+        _add_bubble(welcome_text, is_user=False)
+        ChatService.add_message(user.id, "model", welcome_text)
+        toggle_history(None)
+        page.update()
+
+    btn_clear = ft.Container(
+        content=ft.Row([
+            ft.Icon(ft.Icons.DELETE_OUTLINE_ROUNDED, color=Colors.ERROR, size=18),
+            ft.Text("Xóa lịch sử trò chuyện", color=Colors.ERROR, size=Typography.BODY)
+        ]),
+        padding=10, border_radius=8, bgcolor=Colors.BG_SURFACE,
+        on_click=_clear_chat,
+        ink=True
+    )
+
     history_lv = ft.ListView(
         expand=True,
         spacing=8,
-        controls=[
-            ft.Text("Hôm nay", color=Colors.TEXT_MUTED, size=Typography.SMALL),
-            ft.Container(content=ft.Text("Báo cáo tiến độ"), padding=10, border_radius=8, bgcolor=Colors.BG_SURFACE),
-            ft.Container(content=ft.Text("Lên lịch trình"), padding=10, border_radius=8, bgcolor=Colors.BG_SURFACE),
-            ft.Text("Hôm qua", color=Colors.TEXT_MUTED, size=Typography.SMALL),
-            ft.Container(content=ft.Text("Tóm tắt lỗi UI"), padding=10, border_radius=8, bgcolor=Colors.BG_SURFACE),
-        ]
+        controls=[btn_clear]
     )
     
     history_panel = ft.Container(
@@ -373,6 +417,9 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
     )
 
     # ── Header ─────────────────────────────────────────────────────────────
+    
+
+
     header = ft.Container(
         content=ft.Row([
             ft.Container(

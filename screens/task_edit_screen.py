@@ -4,6 +4,7 @@ TaskFlow - Task Edit View
 import flet as ft
 from datetime import datetime
 import uuid
+import threading
 from core.theme import Colors, Typography, Spacing, Radius
 from core.models import Task
 from core.services import TaskService
@@ -55,6 +56,10 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
     pri_sel = {"v": t.priority}
     sta_sel = {"v": t.status}
     rec_sel = {"v": t.recur_pattern if t.recur_pattern else "none"}
+    cpl_sel = {"v": getattr(t, "complexity", "medium")}
+
+    tf_est = _tf("TG dự kiến (phút)", str(getattr(t, "estimated_minutes", 30)), hint="VD: 30", expand=1)
+    tf_est.keyboard_type = ft.KeyboardType.NUMBER
 
     # ── Fields ───────────────────────────────────────────
     tf_title = ft.TextField(
@@ -254,12 +259,23 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
             chips.append(chip)
         return ft.Row(chips, scroll=ft.ScrollMode.AUTO, spacing=6)
 
-    rem_checkbox = ft.Checkbox(
-        label="Bật thông báo nhắc nhở khi đến giờ",
-        value=(t.reminder_minutes > 0),
-        active_color=Colors.PRIMARY,
-        check_color="white",
-        label_style=ft.TextStyle(size=Typography.SMALL, color=Colors.TEXT_PRIMARY)
+    rem_dropdown = ft.Dropdown(
+        label="Nhắc nhở trước",
+        value=str(t.reminder_minutes) if getattr(t, "reminder_minutes", 0) > 0 else "0",
+        options=[
+            ft.dropdown.Option("0", "Không nhắc"),
+            ft.dropdown.Option("5", "5 phút"),
+            ft.dropdown.Option("15", "15 phút"),
+            ft.dropdown.Option("30", "30 phút"),
+            ft.dropdown.Option("60", "1 giờ"),
+            ft.dropdown.Option("1440", "1 ngày"),
+        ],
+        bgcolor=Colors.BG_CARD,
+        border_color=Colors.BORDER,
+        color=Colors.TEXT_PRIMARY,
+        text_size=Typography.BODY,
+        border_radius=Radius.MD,
+        content_padding=ft.padding.symmetric(horizontal=12, vertical=8)
     )
 
     rec_chips = make_option_chips([
@@ -268,6 +284,71 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
         ("weekly",  "Hàng tuần"),
         ("monthly", "Hàng tháng"),
     ], rec_sel)
+
+    cpl_chips = make_option_chips([
+        ("easy", "Dễ"),
+        ("medium", "Vừa"),
+        ("hard", "Khó"),
+    ], cpl_sel)
+
+    # ── File Picker for OCR ──────────────────────────────
+    def process_ocr_click(_e):
+        def _run():
+            try:
+                import tkinter as tk
+                from tkinter import filedialog
+                root = tk.Tk()
+                root.attributes('-topmost', True)
+                root.withdraw()
+                file_path = filedialog.askopenfilename(
+                    title="Chọn ảnh", 
+                    filetypes=[("Image files", "*.jpg;*.jpeg;*.png;*.bmp")]
+                )
+                root.destroy()
+            except Exception:
+                file_path = None
+
+            if not file_path: return
+            
+            # Using run_task equivalent locally to update ui thread safely
+            def notify_progress():
+                snack(page, "Đang xử lý ảnh (OCR)...")
+                page.update()
+            try:
+                page.run_task(lambda: notify_progress())
+            except Exception:
+                pass
+            
+            try:
+                import pytesseract
+                from PIL import Image
+                text = pytesseract.image_to_string(Image.open(file_path), lang="eng+vie")
+                
+                def _update_ui():
+                    if text.strip():
+                        if not tf_title.value:
+                            lines = [l for l in text.split('\n') if l.strip()]
+                            tf_title.value = lines[0] if lines else ""
+                            tf_desc.value = '\n'.join(lines[1:]) if len(lines) > 1 else text
+                        else:
+                            tf_desc.value = (tf_desc.value + "\n\n" + text).strip()
+                        snack(page, "Trích xuất văn bản thành công!")
+                    else:
+                        snack(page, "Không tìm thấy chữ trong ảnh")
+                    page.update()
+                
+                try:    
+                    page.run_task(lambda: _update_ui())
+                except Exception:
+                    pass
+            except Exception as ex:
+                print("OCR Error:", ex)
+                try:
+                    page.run_task(lambda: snack(page, "Lỗi nhận dạng ảnh. Tesseract-OCR có đang được cài đặt không?"))
+                except Exception:
+                    pass
+
+        threading.Thread(target=_run, daemon=True).start()
 
     # ── Save ─────────────────────────────────────────────
     err_ref = ft.Ref[ft.Text]()
@@ -288,7 +369,9 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
         t.status           = sta_sel["v"]
         t.is_recurring     = rec_sel["v"] != "none"
         t.recur_pattern    = "" if rec_sel["v"] == "none" else rec_sel["v"]
-        t.reminder_minutes = 1 if rem_checkbox.value else 0
+        t.reminder_minutes = int(rem_dropdown.value) if rem_dropdown.value else 0
+        t.complexity       = cpl_sel["v"]
+        t.estimated_minutes= int(tf_est.value) if tf_est.value and tf_est.value.isdigit() else 30
         t.notes            = tf_notes.value.strip()
         if t.status == "done" and not t.completed_at:
             t.completed_at = datetime.now().isoformat()
@@ -312,7 +395,11 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
     # Scrollable form body
     form_body = ft.Container(
         content=ft.Column([
-            _section_label("📝  NỘI DUNG"),
+            ft.Row([
+                _section_label("📝  NỘI DUNG"),
+                ft.Container(expand=True),
+                ft.IconButton(ft.Icons.DOCUMENT_SCANNER_OUTLINED, icon_color=Colors.PRIMARY, icon_size=18, tooltip="Quét chữ từ ảnh", on_click=process_ocr_click)
+            ]),
             tf_title, ft.Container(height=Spacing.SM), tf_desc, _div(),
             
             _section_label("📅  THỜI GIAN"),
@@ -321,10 +408,12 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
             _section_label("🏷️  PHÂN LOẠI"),
             ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.FOLDER_OUTLINED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text("Danh mục", size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), cat_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
             ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.FLAG_OUTLINED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text("Độ ưu tiên", size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), pri_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
+            ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.TERRAIN_ROUNDED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text("Độ phức tạp", size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), cpl_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
+            ft.Container(content=tf_est, padding=ft.padding.symmetric(vertical=6)),
             _div(),
             
             _section_label("⚙️  CÀI ĐẶT"),
-            ft.Container(content=rem_checkbox, padding=ft.padding.symmetric(vertical=4)),
+            ft.Container(content=rem_dropdown, padding=ft.padding.symmetric(vertical=4)),
             ft.Container(height=Spacing.SM),
             ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.REPEAT_ROUNDED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text("Lặp lại", size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), rec_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
             _div(),

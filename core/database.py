@@ -17,6 +17,7 @@ DATA_DIR.mkdir(exist_ok=True)
 USERS_FILE   = DATA_DIR / "users.json"
 TASKS_FILE   = DATA_DIR / "tasks.json"
 SESSION_FILE = DATA_DIR / "session.json"
+CHAT_FILE    = DATA_DIR / "chat.json"
 
 
 # ─── Storage ──────────────────────────────────────────────────────────────────
@@ -98,3 +99,26 @@ class Storage:
         d = cls._load(TASKS_FILE)
         tasks = [t for t in d.get("tasks", []) if t["id"] != task_id]
         cls._save(TASKS_FILE, {"tasks": tasks})
+
+    # ── Chat History ───────────────────────────────────────────────────────────
+
+    @classmethod
+    def get_chat_history(cls, user_id: str) -> list:
+        d = cls._load(CHAT_FILE)
+        return d.get(user_id, [])
+
+    @classmethod
+    def add_chat_message(cls, user_id: str, role: str, text: str):
+        from datetime import datetime
+        d = cls._load(CHAT_FILE)
+        hist = d.get(user_id, [])
+        hist.append({"role": role, "text": text, "timestamp": datetime.now().isoformat()})
+        d[user_id] = hist
+        cls._save(CHAT_FILE, d)
+
+    @classmethod
+    def clear_chat_history(cls, user_id: str):
+        d = cls._load(CHAT_FILE)
+        if user_id in d:
+            del d[user_id]
+            cls._save(CHAT_FILE, d)

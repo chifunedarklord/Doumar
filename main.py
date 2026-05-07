@@ -199,7 +199,7 @@ def main(page: ft.Page):
                         ft.Icon(ft.Icons.BATTERY_FULL, size=14, color=Colors.TEXT_PRIMARY),
                     ], spacing=4),
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                padding=ft.padding.only(left=24, right=20, top=14, bottom=8),
+                padding=ft.Padding(left=20, top=10, right=20, bottom=10),
                 bgcolor="transparent",
             )
         )
@@ -209,7 +209,7 @@ def main(page: ft.Page):
         home_indicator = ft.Container(
             content=ft.Container(width=120, height=4, border_radius=2, bgcolor=Colors.BORDER),
             alignment=ft.Alignment.CENTER,
-            padding=ft.padding.only(bottom=8, top=4),
+            padding=ft.Padding(left=0, top=6, right=0, bottom=6),
             bgcolor="transparent",
         )
         
@@ -227,7 +227,7 @@ def main(page: ft.Page):
             expand=True,
             bgcolor="#FFFFFF",
             border_radius=36,
-            border=ft.border.all(8, "#1F2937"),
+            border=ft.Border(top=ft.BorderSide(8, "#1F2937"), right=ft.BorderSide(8, "#1F2937"), bottom=ft.BorderSide(8, "#1F2937"), left=ft.BorderSide(8, "#1F2937")),
             clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
             shadow=ft.BoxShadow(blur_radius=24, color="#30000000", offset=ft.Offset(0, 10))
         )
@@ -255,18 +255,19 @@ def main(page: ft.Page):
                         try:
                             from plyer import notification
                             notification.notify(
-                                title="TaskFlow Nhắc Việc",
-                                message=f"Đến giờ làm: {t.title}",
+                                title="🔔 TaskFlow - Nhắc Việc",
+                                message=f"Đã đến giờ: {t.title}",
                                 app_name="TaskFlow",
-                                timeout=5
+                                timeout=10
                             )
                         except Exception as e:
                             print("Plyer Error:", e)
                         try:
                             def show_snack(task_title):
                                 sb = ft.SnackBar(
-                                    content=ft.Text(f"🔔 Nhắc nhở tới hạn: {task_title}", color="white"),
-                                    bgcolor="#F59E0B"
+                                    content=ft.Text(f"🔔 Nhắc nhở tới hạn: {task_title}", color="white", weight=ft.FontWeight.BOLD),
+                                    bgcolor="#F59E0B",
+                                    duration=5000
                                 )
                                 page.overlay.append(sb)
                                 sb.open = True

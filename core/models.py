@@ -45,6 +45,8 @@ class Task:
     due_time: Optional[str] = None    # "HH:MM"
     start_date: Optional[str] = None  # ISO date string
     reminder_minutes: int = 0         # 0 = off, 15/30/60/1440 mins before
+    complexity: str = "medium"        # easy / medium / hard
+    estimated_minutes: int = 30       # estimated completion time
     tags: List[str] = field(default_factory=list)
     subtasks: List[dict] = field(default_factory=list)
     notes: str = ""                   # additional notes

@@ -110,7 +110,7 @@ def build_dashboard(page: ft.Page, user, on_navigate):
                 ft.Container(height=2),
                 ft.Row([
                     _mini_stat(str(total), "Tổng", Colors.PRIMARY),
-                    _mini_stat(str(done), "Xong", Colors.PRIMARY),
+                    _mini_stat(str(done), "Hoàn thành", Colors.PRIMARY),
                     _mini_stat(str(in_prog), "Đang làm", Colors.PRIMARY),
                     _mini_stat(str(overdue), "Quá hạn", Colors.PRIMARY),
                 ], spacing=Spacing.SM),

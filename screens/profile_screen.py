@@ -129,7 +129,7 @@ def build_profile_screen(page: ft.Page, user, on_navigate, on_logout=None):
                 ft.Text("Báo cáo", size=Typography.H4, color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
                 stats_row,
                 ft.Container(height=Spacing.MD),
-                ft.Text("Thành tích", size=Typography.H4, color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
+                ft.Text("Thành tựu", size=Typography.H4, color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
                 achievements,
                 ft.Container(height=Spacing.XXXL),
                 ft.Container(height=Spacing.XXXL),

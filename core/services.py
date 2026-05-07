@@ -194,17 +194,41 @@ class TaskService:
     @staticmethod
     def check_reminders(user_id: str, notified: set) -> List[Task]:
         """Trả về danh sách task cần nhắc nhở (chưa thông báo)."""
+        from datetime import datetime, timedelta
         now = datetime.now()
-        curr_date = now.strftime("%Y-%m-%d")
-        curr_time = now.strftime("%H:%M")
         tasks = Storage.get_tasks(user_id)
         due_now = []
         for t in tasks:
-            if t.status != "done" and t.reminder_minutes > 0:
-                tdate = t.start_date or t.due_date
+            if t.status != "done" and getattr(t, "reminder_minutes", 0) > 0:
+                tdate = t.due_date or t.start_date
                 ttime = t.due_time
-                if tdate == curr_date and ttime == curr_time:
-                    if t.id not in notified:
-                        notified.add(t.id)
-                        due_now.append(t)
+                if tdate and ttime:
+                    try:
+                        dt_str = f"{tdate} {ttime}"
+                        dt_obj = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+                        reminder_time = dt_obj - timedelta(minutes=t.reminder_minutes)
+                        diff = (now - reminder_time).total_seconds()
+                        if 0 <= diff <= 300: # Trong vòng 5 phút sau khi đến giờ nhắc
+                            if t.id not in notified:
+                                notified.add(t.id)
+                                due_now.append(t)
+                    except Exception:
+                        pass
         return due_now
+
+# ─── Chat Service ─────────────────────────────────────────────────────────────
+
+class ChatService:
+    """Xử lý lịch sử trò chuyện AI."""
+
+    @staticmethod
+    def get_history(user_id: str) -> list:
+        return Storage.get_chat_history(user_id)
+
+    @staticmethod
+    def add_message(user_id: str, role: str, text: str):
+        Storage.add_chat_message(user_id, role, text)
+        
+    @staticmethod
+    def clear_history(user_id: str):
+        Storage.clear_chat_history(user_id)

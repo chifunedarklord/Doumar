@@ -1,1 +1,5 @@
 flet>=0.21.0
+google-genai
+pytesseract
+Pillow
+plyer
