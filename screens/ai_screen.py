@@ -186,23 +186,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         visible=False,
     )
 
-    # ── History Load / Welcome message ────────────────────────────────────────────────────
-    history = ChatService.get_history(user.id)
-    if not history:
-        name = user.full_name or user.username
-        welcome_text = (f"Xin chào {name}! 👋\n\n"
-                        f"Tôi là Doumar trợ lý của bạn. Hiện bạn có:\n"
-                        f"• {total} công việc tổng cộng\n"
-                        f"• ✅ {done} hoàn thành ({pct}%)\n"
-                        f"• 📋 {pending} đang chờ\n\n"
-                        "Hỏi tôi bất cứ điều gì về quản lý công việc và năng suất!")
-        _add_bubble(welcome_text, is_user=False, animate=False)
-        ChatService.add_message(user.id, "model", welcome_text)
-    else:
-        for msg in history:
-            _add_bubble(msg["text"], is_user=(msg["role"] == "user"), animate=False)
-
-    chat_lv.controls.append(_typing)
+    # (History and Welcome message loading moved to the end)
 
     # ── Input & send ───────────────────────────────────────────────────────
     tf = ft.TextField(
@@ -291,11 +275,12 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
 
         def _reply():
             from utils.ai_helper import get_ai_reply
-            reply = get_ai_reply(user.settings, message, user.id, image_path)
+            reply = get_ai_reply(user.settings, message, user.id, _state["session_id"], image_path)
 
             _typing.visible = False
             _add_bubble(text=reply, is_user=False)
-            ChatService.add_message(user.id, "model", reply)
+            ChatService.add_message(user.id, _state["session_id"], "model", reply)
+            _load_sessions_ui()
             page.update()
 
         threading.Thread(target=_reply, daemon=True).start()
@@ -307,9 +292,10 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         tf.value = ""
         if text and not image_path:
             _add_bubble(text=text, is_user=True)
-            ChatService.add_message(user.id, "user", text)
+            ChatService.add_message(user.id, _state["session_id"], "user", text)
         elif image_path:
-            ChatService.add_message(user.id, "user", f"[Đã gửi hình ảnh] {text}")
+            ChatService.add_message(user.id, _state["session_id"], "user", f"[Đã gửi hình ảnh] {text}")
+        _load_sessions_ui()
         _simulate_reply(message=text, image_path=image_path)
 
     send_btn = ft.Container(
@@ -358,31 +344,27 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
     )
 
     # ── History Panel ──────────────────────────────────────────────────────
-    def _clear_chat(_):
-        ChatService.clear_history(user.id)
-        chat_lv.controls.clear()
-        chat_lv.controls.append(_typing)
-        name = user.full_name or user.username
-        welcome_text = "Lịch sử đã được xóa. Tôi có thể giúp gì cho bạn?"
-        _add_bubble(welcome_text, is_user=False)
-        ChatService.add_message(user.id, "model", welcome_text)
-        toggle_history(None)
+    _history_state = {"open": False}
+    def toggle_history(e):
+        _history_state["open"] = not _history_state["open"]
+        if _history_state["open"]:
+            history_panel.width = 250
+            history_panel.padding = 16
+        else:
+            history_panel.width = 0
+            history_panel.padding = 0
         page.update()
 
-    btn_clear = ft.Container(
-        content=ft.Row([
-            ft.Icon(ft.Icons.DELETE_OUTLINE_ROUNDED, color=Colors.ERROR, size=18),
-            ft.Text("Xóa lịch sử trò chuyện", color=Colors.ERROR, size=Typography.BODY)
-        ]),
-        padding=10, border_radius=8, bgcolor=Colors.BG_SURFACE,
-        on_click=_clear_chat,
-        ink=True
-    )
+    def _start_new_chat(_):
+        _state["session_id"] = ChatService.create_session(user.id, "Chat mới")
+        _load_active_session()
+        if _history_state["open"]:
+            toggle_history(None)
 
     history_lv = ft.ListView(
         expand=True,
         spacing=8,
-        controls=[btn_clear]
+        controls=[]
     )
     
     history_panel = ft.Container(
@@ -398,17 +380,6 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         animate=ft.Animation(300, ft.AnimationCurve.EASE_OUT_CUBIC),
         clip_behavior=ft.ClipBehavior.HARD_EDGE
     )
-
-    _history_state = {"open": False}
-    def toggle_history(e):
-        _history_state["open"] = not _history_state["open"]
-        if _history_state["open"]:
-            history_panel.width = 250
-            history_panel.padding = 16
-        else:
-            history_panel.width = 0
-            history_panel.padding = 0
-        page.update()
 
     btn_menu = ft.IconButton(
         icon=ft.Icons.MENU_ROUNDED,
@@ -447,6 +418,12 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
                    vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ], spacing=2, tight=True),
             ft.Container(expand=True),
+            ft.IconButton(
+                icon=ft.Icons.ADD_COMMENT_ROUNDED,
+                icon_color=Colors.TEXT_MUTED,
+                tooltip="Đoạn chat mới",
+                on_click=_start_new_chat
+            ),
             ft.Container(
                 content=ft.Text("AI", size=Typography.TINY,
                                 color="white", weight=Typography.BOLD),
@@ -487,6 +464,107 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
             bgcolor=Colors.BG_DARKEST,
         ),
     ], spacing=0, tight=True, expand=True)
+
+    _state = {"session_id": None}
+
+    def _load_sessions_ui():
+        sessions = ChatService.get_sessions(user.id)
+        controls = []
+        for s in sessions:
+            def make_on_select(sid):
+                return lambda e: _switch_session(sid)
+            def make_on_delete(sid):
+                return lambda e: _delete_session(sid)
+                
+            is_active = (s["id"] == _state["session_id"])
+            item = ft.Container(
+                content=ft.Row([
+                    ft.Icon(ft.Icons.CHAT_BUBBLE_OUTLINE, size=16, color=Colors.PRIMARY if is_active else Colors.TEXT_MUTED),
+                    ft.Text(s.get("title", "Chat"), color=Colors.TEXT_PRIMARY if is_active else Colors.TEXT_SECONDARY, size=Typography.BODY, expand=True, no_wrap=True),
+                    ft.IconButton(ft.Icons.CLOSE, icon_size=16, icon_color=Colors.TEXT_MUTED, on_click=make_on_delete(s["id"]), padding=0)
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                padding=10, border_radius=8, bgcolor=Colors.BG_SURFACE if is_active else "transparent",
+                on_click=make_on_select(s["id"]), ink=True
+            )
+            controls.append(item)
+            
+        btn_clear_all = ft.Container(
+            content=ft.Row([
+                ft.Icon(ft.Icons.DELETE_OUTLINE_ROUNDED, color=Colors.ERROR, size=18),
+                ft.Text("Xóa tất cả trò chuyện", color=Colors.ERROR, size=Typography.BODY)
+            ]),
+            padding=10, border_radius=8, bgcolor=Colors.BG_SURFACE,
+            on_click=lambda _: _clear_all_sessions(),
+            ink=True
+        )
+        if controls:
+            controls.append(ft.Divider(color=Colors.BORDER))
+        controls.append(btn_clear_all)
+        
+        history_lv.controls = controls
+        try:
+            page.update()
+        except:
+            pass
+
+    def _switch_session(sid):
+        _state["session_id"] = sid
+        _load_active_session()
+        if _history_state["open"]:
+            toggle_history(None)
+
+    def _delete_session(sid):
+        ChatService.delete_session(user.id, sid)
+        if _state["session_id"] == sid:
+            _state["session_id"] = None
+            _load_active_session()
+        else:
+            _load_sessions_ui()
+
+    def _clear_all_sessions():
+        ChatService.clear_all(user.id)
+        _state["session_id"] = None
+        _load_active_session()
+
+    def _load_active_session():
+        chat_lv.controls.clear()
+        
+        sessions = ChatService.get_sessions(user.id)
+        if not _state["session_id"]:
+            if sessions:
+                _state["session_id"] = sessions[0]["id"]
+            else:
+                _state["session_id"] = ChatService.create_session(user.id, "Chat mới")
+        
+        session = ChatService.get_session(user.id, _state["session_id"])
+        if not session:
+             _state["session_id"] = ChatService.create_session(user.id, "Chat mới")
+             session = ChatService.get_session(user.id, _state["session_id"])
+             
+        history = session.get("messages", [])
+        if not history:
+            name = user.full_name or user.username
+            welcome_text = (f"Xin chào {name}! 👋\n\n"
+                            f"Tôi là Doumar trợ lý của bạn. Hiện bạn có:\n"
+                            f"• {total} công việc tổng cộng\n"
+                            f"• ✅ {done} hoàn thành ({pct}%)\n"
+                            f"• 📋 {pending} đang chờ\n\n"
+                            "Hỏi tôi bất cứ điều gì về quản lý công việc và năng suất!")
+            _add_bubble(welcome_text, is_user=False, animate=False)
+            ChatService.add_message(user.id, _state["session_id"], "model", welcome_text)
+        else:
+            for msg in history:
+                _add_bubble(msg["text"], is_user=(msg["role"] == "user"), animate=False)
+        
+        chat_lv.controls.append(_typing)
+        _load_sessions_ui()
+        try:
+            page.update()
+            _scroll_down()
+        except:
+            pass
+
+    _load_active_session()
 
     return ft.Row([
         main_chat,

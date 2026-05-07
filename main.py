@@ -276,7 +276,7 @@ def main(page: ft.Page):
                         except Exception:
                             pass
                 except Exception:
-                    pass
+                        pass
 
     threading.Thread(target=_notification_worker, daemon=True).start()
 

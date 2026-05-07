@@ -22,34 +22,38 @@ NGUYÊN TẮC PHẢN HỒI:
 4. Phản hồi luôn dùng định dạng Markdown (có in đậm, danh sách) để dễ nhìn.
 """
 
-def get_ai_reply(settings: dict, message: str, user_id: str, image_path: str = None) -> str:
-    return get_gemini_reply(message, user_id, image_path)
+def get_ai_reply(settings: dict, message: str, user_id: str, session_id: str, image_path: str = None) -> str:
+    return get_gemini_reply(message, user_id, session_id, image_path)
 
-def get_gemini_reply(message: str, user_id: str, image_path: str = None) -> str:
+def get_gemini_reply(message: str, user_id: str, session_id: str, image_path: str = None) -> str:
     try:
-        client = genai.Client(api_key="AIzaSyD7fhnSCDFg4dbH-vsO05aWF7D36MeBGTM")
+        client = genai.Client(api_key="")
         
         context = _get_context(user_id)
         sys_prompt = _get_system_prompt(context)
         
-        history = ChatService.get_history(user_id)
+        session = ChatService.get_session(user_id, session_id)
+        history = session["messages"] if session else []
         contents = []
-        for msg in history:
+        
+        for i, msg in enumerate(history):
             role = "user" if msg["role"] == "user" else "model"
-            contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg["text"])]))
             
-        parts = []
-        if image_path:
-            with open(image_path, "rb") as f:
-                img_data = f.read()
-            ext = image_path.split('.')[-1].lower()
-            mime = f"image/{ext}" if ext in ["jpg", "jpeg", "png", "webp"] else "image/jpeg"
-            parts.append(types.Part.from_bytes(data=img_data, mime_type=mime))
-            parts.append(types.Part.from_text(text="Hãy phân tích hình ảnh này. " + message))
-        else:
-            parts.append(types.Part.from_text(text=message))
-            
-        contents.append(types.Content(role="user", parts=parts))
+            if i == len(history) - 1 and role == "user" and image_path:
+                parts = []
+                with open(image_path, "rb") as f:
+                    img_data = f.read()
+                ext = image_path.split('.')[-1].lower()
+                mime = f"image/{ext}" if ext in ["jpg", "jpeg", "png", "webp"] else "image/jpeg"
+                parts.append(types.Part.from_bytes(data=img_data, mime_type=mime))
+                parts.append(types.Part.from_text(text="Hãy phân tích hình ảnh này. " + msg["text"]))
+                contents.append(types.Content(role=role, parts=parts))
+            else:
+                contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg["text"])]))
+        
+        # Đề phòng trường hợp lỗi không có message nào (VD: tạo mới xong gọi AI luôn)
+        if not contents:
+            contents.append(types.Content(role="user", parts=[types.Part.from_text(text=message)]))
         
         response = client.models.generate_content(
             model='gemini-2.5-flash',

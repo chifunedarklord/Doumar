@@ -219,16 +219,28 @@ class TaskService:
 # ─── Chat Service ─────────────────────────────────────────────────────────────
 
 class ChatService:
-    """Xử lý lịch sử trò chuyện AI."""
+    """Xử lý lịch sử trò chuyện AI qua các session."""
 
     @staticmethod
-    def get_history(user_id: str) -> list:
-        return Storage.get_chat_history(user_id)
+    def get_sessions(user_id: str) -> list:
+        return Storage.get_chat_sessions(user_id)
 
     @staticmethod
-    def add_message(user_id: str, role: str, text: str):
-        Storage.add_chat_message(user_id, role, text)
+    def get_session(user_id: str, session_id: str) -> dict:
+        return Storage.get_chat_session(user_id, session_id)
+
+    @staticmethod
+    def create_session(user_id: str, title: str = "Chat mới") -> str:
+        return Storage.create_chat_session(user_id, title)
+
+    @staticmethod
+    def add_message(user_id: str, session_id: str, role: str, text: str):
+        Storage.add_chat_message(user_id, session_id, role, text)
+
+    @staticmethod
+    def delete_session(user_id: str, session_id: str):
+        Storage.delete_chat_session(user_id, session_id)
         
     @staticmethod
-    def clear_history(user_id: str):
+    def clear_all(user_id: str):
         Storage.clear_chat_history(user_id)
