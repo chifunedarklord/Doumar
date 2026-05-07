@@ -2,9 +2,11 @@
 TaskFlow - Core package
 Public API re-exports để backward-compat.
 """
-from core.models import User, Task
+from core.models import User, Task, WorkSession, BehaviorEvent, AIMemory
 from core.database import Storage
-from core.services import AuthService, TaskService
+from core.services import (AuthService, TaskService, ChatService,
+                            BehaviorService, WorkSessionService,
+                            AnalyticsService, AIMemoryService)
 
 # Backward-compat aliases (dùng trong auth_screen cũ)
 def login(username, password):

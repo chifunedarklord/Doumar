@@ -11,23 +11,20 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, List
 
-from core.models import User, Task
+from core.models import User, Task, WorkSession, BehaviorEvent, AIMemory
 
 # ─── Database path ────────────────────────────────────────────────────────────
 
-DATA_DIR = Path.home() / ".taskflow"
+DATA_DIR = Path(__file__).parent.parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
-
 DB_PATH = DATA_DIR / "taskflow.db"
 
-# Thread-local storage để mỗi thread có connection riêng
 _local = threading.local()
 
 
 # ─── Connection Management ────────────────────────────────────────────────────
 
 def get_connection() -> sqlite3.Connection:
-    """Trả về connection SQLite của thread hiện tại (tạo mới nếu chưa có)."""
     if not hasattr(_local, "conn") or _local.conn is None:
         _local.conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
         _local.conn.row_factory = sqlite3.Row
@@ -37,7 +34,6 @@ def get_connection() -> sqlite3.Connection:
 
 
 def close_connection():
-    """Đóng connection của thread hiện tại."""
     if hasattr(_local, "conn") and _local.conn:
         _local.conn.close()
         _local.conn = None
@@ -46,7 +42,6 @@ def close_connection():
 # ─── Schema Init ──────────────────────────────────────────────────────────────
 
 def init_db():
-    """Khởi tạo tất cả các bảng nếu chưa tồn tại."""
     conn = get_connection()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS users (
@@ -85,7 +80,17 @@ def init_db():
             updated_at        TEXT NOT NULL,
             completed_at      TEXT,
             is_recurring      INTEGER DEFAULT 0,
-            recur_pattern     TEXT DEFAULT ''
+            recur_pattern     TEXT DEFAULT '',
+            impact_score      REAL DEFAULT 5.0,
+            risk_level        TEXT DEFAULT 'low',
+            energy_required   TEXT DEFAULT 'medium',
+            focus_required    TEXT DEFAULT 'medium',
+            difficulty_level  INTEGER DEFAULT 5,
+            motivation_score  REAL DEFAULT 5.0,
+            dependencies      TEXT DEFAULT '[]',
+            actual_minutes    INTEGER DEFAULT 0,
+            workload_score    REAL DEFAULT 5.0,
+            ai_priority_score REAL DEFAULT 50.0
         );
 
         CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -106,9 +111,70 @@ def init_db():
             FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
         );
 
+        -- ── AI / Behavior Tables ────────────────────────────────────────────
+
+        CREATE TABLE IF NOT EXISTS user_behavior (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      TEXT NOT NULL,
+            event_type   TEXT NOT NULL,
+            event_data   TEXT DEFAULT '{}',
+            hour_of_day  INTEGER,
+            day_of_week  INTEGER,
+            timestamp    TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS work_sessions (
+            id               TEXT PRIMARY KEY,
+            user_id          TEXT NOT NULL,
+            task_id          TEXT,
+            started_at       TEXT NOT NULL,
+            ended_at         TEXT,
+            duration_minutes INTEGER DEFAULT 0,
+            focus_quality    INTEGER DEFAULT 5,
+            notes            TEXT DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS ai_memory (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      TEXT NOT NULL,
+            memory_type  TEXT NOT NULL,
+            key          TEXT NOT NULL,
+            value        TEXT NOT NULL,
+            confidence   REAL DEFAULT 0.5,
+            updated_at   TEXT NOT NULL,
+            UNIQUE(user_id, memory_type, key)
+        );
+
+        CREATE TABLE IF NOT EXISTS analytics_cache (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      TEXT NOT NULL,
+            metric_name  TEXT NOT NULL,
+            metric_value TEXT NOT NULL,
+            computed_at  TEXT NOT NULL,
+            UNIQUE(user_id, metric_name)
+        );
+
+        CREATE TABLE IF NOT EXISTS project_progress (
+            id          TEXT PRIMARY KEY,
+            user_id     TEXT NOT NULL,
+            name        TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            target_date TEXT,
+            status      TEXT DEFAULT 'active',
+            task_ids    TEXT DEFAULT '[]',
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        );
+
+        -- Indexes
         CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks(user_id);
+        CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(user_id, status);
         CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id);
         CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
+        CREATE INDEX IF NOT EXISTS idx_behavior_user ON user_behavior(user_id);
+        CREATE INDEX IF NOT EXISTS idx_behavior_type ON user_behavior(user_id, event_type);
+        CREATE INDEX IF NOT EXISTS idx_work_sessions_user ON work_sessions(user_id);
+        CREATE INDEX IF NOT EXISTS idx_ai_memory_user ON ai_memory(user_id);
     """)
     conn.commit()
     _apply_migrations(conn)
@@ -136,6 +202,17 @@ def _apply_migrations(conn: sqlite3.Connection):
         "completed_at":      "TEXT",
         "is_recurring":      "INTEGER DEFAULT 0",
         "recur_pattern":     "TEXT DEFAULT ''",
+        # AI fields mới
+        "impact_score":      "REAL DEFAULT 5.0",
+        "risk_level":        "TEXT DEFAULT 'low'",
+        "energy_required":   "TEXT DEFAULT 'medium'",
+        "focus_required":    "TEXT DEFAULT 'medium'",
+        "difficulty_level":  "INTEGER DEFAULT 5",
+        "motivation_score":  "REAL DEFAULT 5.0",
+        "dependencies":      "TEXT DEFAULT '[]'",
+        "actual_minutes":    "INTEGER DEFAULT 0",
+        "workload_score":    "REAL DEFAULT 5.0",
+        "ai_priority_score": "REAL DEFAULT 50.0",
     }
     for col, typedef in task_cols.items():
         if col not in existing_tasks:
@@ -215,9 +292,7 @@ class Storage:
     @classmethod
     def get_tasks(cls, user_id: str) -> List[Task]:
         conn = get_connection()
-        rows = conn.execute(
-            "SELECT * FROM tasks WHERE user_id=?", (user_id,)
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM tasks WHERE user_id=?", (user_id,)).fetchall()
         return [cls._row_to_task(r) for r in rows]
 
     @classmethod
@@ -229,8 +304,11 @@ class Storage:
             (id, user_id, title, description, category, priority, status,
              due_date, due_time, start_date, reminder_minutes, complexity,
              estimated_minutes, tags, subtasks, notes, created_at, updated_at,
-             completed_at, is_recurring, recur_pattern)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             completed_at, is_recurring, recur_pattern,
+             impact_score, risk_level, energy_required, focus_required,
+             difficulty_level, motivation_score, dependencies, actual_minutes,
+             workload_score, ai_priority_score)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET
                 title=excluded.title, description=excluded.description,
                 category=excluded.category, priority=excluded.priority,
@@ -243,7 +321,17 @@ class Storage:
                 notes=excluded.notes, updated_at=excluded.updated_at,
                 completed_at=excluded.completed_at,
                 is_recurring=excluded.is_recurring,
-                recur_pattern=excluded.recur_pattern
+                recur_pattern=excluded.recur_pattern,
+                impact_score=excluded.impact_score,
+                risk_level=excluded.risk_level,
+                energy_required=excluded.energy_required,
+                focus_required=excluded.focus_required,
+                difficulty_level=excluded.difficulty_level,
+                motivation_score=excluded.motivation_score,
+                dependencies=excluded.dependencies,
+                actual_minutes=excluded.actual_minutes,
+                workload_score=excluded.workload_score,
+                ai_priority_score=excluded.ai_priority_score
         """, (
             task.id, task.user_id, task.title, task.description,
             task.category, task.priority, task.status,
@@ -251,7 +339,11 @@ class Storage:
             task.reminder_minutes, task.complexity, task.estimated_minutes,
             json.dumps(task.tags), json.dumps(task.subtasks), task.notes,
             task.created_at, task.updated_at, task.completed_at,
-            int(task.is_recurring), task.recur_pattern
+            int(task.is_recurring), task.recur_pattern,
+            task.impact_score, task.risk_level, task.energy_required,
+            task.focus_required, task.difficulty_level, task.motivation_score,
+            json.dumps(task.dependencies), task.actual_minutes,
+            task.workload_score, task.ai_priority_score,
         ))
         conn.commit()
 
@@ -263,9 +355,12 @@ class Storage:
 
     @staticmethod
     def _row_to_task(row) -> Task:
-        d = dict(row)
+        import dataclasses
+        valid_keys = {f.name for f in dataclasses.fields(Task)}
+        d = {k: v for k, v in dict(row).items() if k in valid_keys}
         d["tags"]         = json.loads(d.get("tags", "[]") or "[]")
         d["subtasks"]     = json.loads(d.get("subtasks", "[]") or "[]")
+        d["dependencies"] = json.loads(d.get("dependencies", "[]") or "[]")
         d["is_recurring"] = bool(d.get("is_recurring", 0))
         return Task(**d)
 
@@ -333,7 +428,6 @@ class Storage:
             "INSERT INTO chat_messages (session_id, user_id, role, text, timestamp) VALUES (?,?,?,?,?)",
             (session_id, user_id, role, text, now)
         )
-        # Cập nhật tiêu đề session từ tin nhắn user đầu tiên
         count = conn.execute(
             "SELECT COUNT(*) as c FROM chat_messages WHERE session_id=?", (session_id,)
         ).fetchone()["c"]
@@ -368,6 +462,160 @@ class Storage:
             (session_id, user_id)
         )
         conn.commit()
+
+    # ── Behavior Events ────────────────────────────────────────────────────────
+
+    @classmethod
+    def log_behavior(cls, user_id: str, event_type: str, event_data: dict = None,
+                     hour_of_day: int = None, day_of_week: int = None):
+        conn = get_connection()
+        now = datetime.now()
+        conn.execute(
+            """INSERT INTO user_behavior
+               (user_id, event_type, event_data, hour_of_day, day_of_week, timestamp)
+               VALUES (?,?,?,?,?,?)""",
+            (user_id, event_type,
+             json.dumps(event_data or {}),
+             hour_of_day if hour_of_day is not None else now.hour,
+             day_of_week if day_of_week is not None else now.weekday(),
+             now.isoformat())
+        )
+        conn.commit()
+
+    @classmethod
+    def get_behavior_events(cls, user_id: str, event_type: str = None,
+                            limit: int = 500) -> List[dict]:
+        conn = get_connection()
+        if event_type:
+            rows = conn.execute(
+                "SELECT * FROM user_behavior WHERE user_id=? AND event_type=? ORDER BY timestamp DESC LIMIT ?",
+                (user_id, event_type, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM user_behavior WHERE user_id=? ORDER BY timestamp DESC LIMIT ?",
+                (user_id, limit)
+            ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["event_data"] = json.loads(d.get("event_data", "{}") or "{}")
+            result.append(d)
+        return result
+
+    # ── Work Sessions ──────────────────────────────────────────────────────────
+
+    @classmethod
+    def save_work_session(cls, ws: WorkSession):
+        conn = get_connection()
+        conn.execute("""
+            INSERT INTO work_sessions
+            (id, user_id, task_id, started_at, ended_at, duration_minutes, focus_quality, notes)
+            VALUES (?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                ended_at=excluded.ended_at,
+                duration_minutes=excluded.duration_minutes,
+                focus_quality=excluded.focus_quality,
+                notes=excluded.notes
+        """, (ws.id, ws.user_id, ws.task_id, ws.started_at, ws.ended_at,
+              ws.duration_minutes, ws.focus_quality, ws.notes))
+        conn.commit()
+
+    @classmethod
+    def get_work_sessions(cls, user_id: str, limit: int = 100) -> List[dict]:
+        conn = get_connection()
+        rows = conn.execute(
+            "SELECT * FROM work_sessions WHERE user_id=? ORDER BY started_at DESC LIMIT ?",
+            (user_id, limit)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── AI Memory ──────────────────────────────────────────────────────────────
+
+    @classmethod
+    def set_memory(cls, user_id: str, memory_type: str, key: str,
+                   value, confidence: float = 0.5):
+        conn = get_connection()
+        now = datetime.now().isoformat()
+        conn.execute("""
+            INSERT INTO ai_memory (user_id, memory_type, key, value, confidence, updated_at)
+            VALUES (?,?,?,?,?,?)
+            ON CONFLICT(user_id, memory_type, key) DO UPDATE SET
+                value=excluded.value,
+                confidence=excluded.confidence,
+                updated_at=excluded.updated_at
+        """, (user_id, memory_type, key,
+              json.dumps(value) if not isinstance(value, str) else value,
+              confidence, now))
+        conn.commit()
+
+    @classmethod
+    def get_memory(cls, user_id: str, memory_type: str = None) -> List[dict]:
+        conn = get_connection()
+        if memory_type:
+            rows = conn.execute(
+                "SELECT * FROM ai_memory WHERE user_id=? AND memory_type=? ORDER BY updated_at DESC",
+                (user_id, memory_type)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM ai_memory WHERE user_id=? ORDER BY updated_at DESC",
+                (user_id,)
+            ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["value"] = json.loads(d["value"])
+            except Exception:
+                pass
+            result.append(d)
+        return result
+
+    @classmethod
+    def get_memory_value(cls, user_id: str, memory_type: str, key: str, default=None):
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT value FROM ai_memory WHERE user_id=? AND memory_type=? AND key=?",
+            (user_id, memory_type, key)
+        ).fetchone()
+        if not row:
+            return default
+        try:
+            return json.loads(row["value"])
+        except Exception:
+            return row["value"]
+
+    # ── Analytics Cache ────────────────────────────────────────────────────────
+
+    @classmethod
+    def set_analytics(cls, user_id: str, metric_name: str, metric_value):
+        conn = get_connection()
+        now = datetime.now().isoformat()
+        conn.execute("""
+            INSERT INTO analytics_cache (user_id, metric_name, metric_value, computed_at)
+            VALUES (?,?,?,?)
+            ON CONFLICT(user_id, metric_name) DO UPDATE SET
+                metric_value=excluded.metric_value,
+                computed_at=excluded.computed_at
+        """, (user_id, metric_name,
+              json.dumps(metric_value) if not isinstance(metric_value, str) else metric_value,
+              now))
+        conn.commit()
+
+    @classmethod
+    def get_analytics(cls, user_id: str, metric_name: str, default=None):
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT metric_value FROM analytics_cache WHERE user_id=? AND metric_name=?",
+            (user_id, metric_name)
+        ).fetchone()
+        if not row:
+            return default
+        try:
+            return json.loads(row["metric_value"])
+        except Exception:
+            return row["metric_value"]
 
 
 # Tự động khởi tạo database khi import module

@@ -56,6 +56,18 @@ class Task:
     is_recurring: bool = False
     recur_pattern: str = ""           # daily / weekly / monthly
 
+    # ── AI-powered fields ──────────────────────────────────────────────────────
+    impact_score: float = 5.0         # Mức ảnh hưởng công việc: 1-10
+    risk_level: str = "low"           # Rủi ro khi trễ: low / medium / high
+    energy_required: str = "medium"   # Năng lượng cần: low / medium / high
+    focus_required: str = "medium"    # Sự tập trung cần: low / medium / high
+    difficulty_level: int = 5         # Độ khó: 1-10
+    motivation_score: float = 5.0     # Mức động lực: 1-10
+    dependencies: List[str] = field(default_factory=list)  # List task IDs phụ thuộc
+    actual_minutes: int = 0           # Thực tế đã dành (tính từ work_sessions)
+    workload_score: float = 5.0       # Workload tổng hợp: calculated by AI engine
+    ai_priority_score: float = 50.0   # Dynamic priority score từ AI: 0-100
+
     def to_dict(self):
         return asdict(self)
 
@@ -82,3 +94,69 @@ class Task:
         if diff < 0:    return f"Quá hạn {abs(diff)} ngày"
         if diff <= 7:   return f"{diff} ngày nữa"
         return d.strftime("%d/%m/%Y")
+
+    @property
+    def days_until_due(self) -> Optional[int]:
+        if not self.due_date:
+            return None
+        d = date.fromisoformat(self.due_date)
+        return (d - date.today()).days
+
+
+# ─── WorkSession ──────────────────────────────────────────────────────────────
+
+@dataclass
+class WorkSession:
+    """Theo dõi mỗi phiên làm việc thực tế của user."""
+    id: str
+    user_id: str
+    task_id: Optional[str]            # None = focus session không liên quan task cụ thể
+    started_at: str                   # ISO datetime
+    ended_at: Optional[str] = None    # None = session đang chạy
+    duration_minutes: int = 0         # Tính khi kết thúc
+    focus_quality: int = 5            # Chất lượng tập trung: 1-10 (user self-report)
+    notes: str = ""
+
+    def to_dict(self):
+        return asdict(self)
+
+
+# ─── BehaviorEvent ────────────────────────────────────────────────────────────
+
+@dataclass
+class BehaviorEvent:
+    """
+    Ghi lại sự kiện hành vi để AI học.
+    event_type: task_complete | task_delay | task_start | session_start |
+                session_end | task_skip | reschedule | overdue_ack
+    """
+    id: Optional[int]                 # Auto-increment, None khi chưa save
+    user_id: str
+    event_type: str
+    event_data: dict = field(default_factory=dict)  # JSON metadata
+    hour_of_day: int = field(default_factory=lambda: datetime.now().hour)
+    day_of_week: int = field(default_factory=lambda: datetime.now().weekday())  # 0=Mon
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    def to_dict(self):
+        return asdict(self)
+
+
+# ─── AIMemory ─────────────────────────────────────────────────────────────────
+
+@dataclass
+class AIMemory:
+    """
+    Bộ nhớ dài hạn của AI về user.
+    memory_type: skill | habit | goal | project | performance | preference
+    """
+    id: Optional[int]
+    user_id: str
+    memory_type: str
+    key: str                          # e.g., "peak_productivity_hour", "preferred_task_size"
+    value: str                        # JSON string
+    confidence: float = 0.5          # Độ tin cậy: 0-1
+    updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    def to_dict(self):
+        return asdict(self)
