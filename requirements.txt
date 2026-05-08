@@ -3,3 +3,5 @@ google-genai
 pytesseract
 Pillow
 plyer
+sqlalchemy>=2.0.0
+bcrypt

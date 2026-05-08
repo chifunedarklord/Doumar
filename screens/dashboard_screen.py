@@ -22,6 +22,9 @@ def build_dashboard(page: ft.Page, user, on_navigate):
     tasks = TaskService.get_tasks(user.id)
     today_str = date.today().isoformat()
 
+    # ── Daily Check-in ──────────────────────────────────────
+    checkin_card = _build_checkin_card(page, user)
+
     # ── Stats ───────────────────────────────────────────────
     total     = len(tasks)
     done      = sum(1 for t in tasks if t.status == "done")
@@ -30,33 +33,61 @@ def build_dashboard(page: ft.Page, user, on_navigate):
     today_tasks = [t for t in tasks if t.due_date == today_str and t.status != "done"]
     completion_pct = int(done / total * 100) if total else 0
 
-    # ── AI Data ──────────────────────────────────────────────
+    # ── AI Data (Cached) ─────────────────────────────────────
     try:
-        peak_hours = BehaviorService.get_peak_hours(user.id)
-        productivity_score = BehaviorService.get_productivity_score(user.id)
+        report = AnalyticsService.get_full_report(user.id)
+        peak_hours = report.get("peak_hours", [9, 10, 11])
+        productivity_score = report.get("weekly_score", 0.0)
+        burnout = report.get("burnout", {
+            "level": "low", "label": "Thấp", "color": Colors.SUCCESS,
+            "score": 0, "reasons": [], "suggestions": []
+        })
     except Exception:
         peak_hours = [9, 10, 11]
         productivity_score = 0.0
-
-    # ── Burnout detection ────────────────────────────────────
-    try:
-        from core.ai_engine import BurnoutDetector
-        from core.database import Storage
-        sessions = Storage.get_work_sessions(user.id, 50)
-        events = Storage.get_behavior_events(user.id, limit=100)
-        burnout = BurnoutDetector.get_risk(tasks, sessions, events)
-    except Exception:
         burnout = {"level": "low", "label": "Thấp", "color": Colors.SUCCESS,
                    "score": 0, "reasons": [], "suggestions": []}
 
-    # ── AI Priority Ranked tasks ─────────────────────────────
+    # ── Smart Schedule ─────────────────────────────
     try:
-        from core.ai_engine import PriorityEngine
+        from core.intelligence.scheduling_engine import SchedulingEngine
+        from core.services import AIMemoryService
         current_hour = datetime.now().hour
-        ctx = {"peak_hours": peak_hours, "current_hour": current_hour}
-        ai_ranked = PriorityEngine.rank_tasks(tasks, ctx)[:3]
+
+        checkin_energy = AIMemoryService.recall_value(user.id, "state", "estimated_energy")
+        checkin_stress = AIMemoryService.recall_value(user.id, "state", "estimated_stress")
+        energy_level = int(checkin_energy) if checkin_energy is not None else getattr(user, "energy_level", 7)
+        stress_level = int(checkin_stress) if checkin_stress is not None else getattr(user, "stress_level", 5)
+
+        work_start_raw = getattr(user, "work_start", "08:00")
+        work_end_raw   = getattr(user, "work_end",   "18:00")
+        try:
+            work_start_hour = int(work_start_raw.split(":")[0])
+        except Exception:
+            work_start_hour = 8
+        try:
+            work_end_hour = int(work_end_raw.split(":")[0])
+        except Exception:
+            work_end_hour = 20
+
+        ctx = {
+            "peak_hours":             peak_hours,
+            "current_hour":           current_hour,
+            "energy_level":           energy_level,
+            "stress_level":           stress_level,
+            "daily_workload_minutes": sum(
+                getattr(t, "estimated_minutes", 30)
+                for t in tasks
+                if t.status not in ("done", "cancelled")
+                and getattr(t, "due_date", None) == today_str
+            ),
+            "work_start_hour": work_start_hour,
+            "work_end_hour":   work_end_hour,
+            "user_id":         user.id,
+        }
+        schedule_slots = SchedulingEngine.suggest_today(tasks, peak_hours, ctx)
     except Exception:
-        ai_ranked = [t for t in tasks if t.status not in ("done","cancelled")][:3]
+        schedule_slots = []
 
     # ── Header ───────────────────────────────────────────────
     now = datetime.now()
@@ -165,23 +196,43 @@ def build_dashboard(page: ft.Page, user, on_navigate):
         shadow=ft.BoxShadow(blur_radius=12, color="#00000018", offset=ft.Offset(0, 3)),
     )
 
-    # ── Burnout warning banner (chỉ hiện nếu cao) ───────────
-    burnout_banner = None
-    if burnout["level"] in ("high", "critical") and burnout["suggestions"]:
-        burnout_banner = ft.Container(
+    # ── Actionable Advice Banner ───────────────────────────
+    try:
+        suggestions = report.get("recommendations", [])
+    except Exception:
+        suggestions = []
+
+    advice_banner = None
+    if suggestions:
+        sug = suggestions[0]
+        pri = sug.get("priority", "low")
+        if pri == "critical":
+            banner_bg     = f"#20{Colors.ERROR[1:]}"
+            banner_border = f"#50{Colors.ERROR[1:]}"
+            title_color   = Colors.ERROR
+        elif pri == "high":
+            banner_bg     = f"#20{Colors.WARNING[1:]}"
+            banner_border = f"#50{Colors.WARNING[1:]}"
+            title_color   = Colors.WARNING
+        else:
+            banner_bg     = f"#20{Colors.PRIMARY[1:]}"
+            banner_border = Colors.PRIMARY_BORDER
+            title_color   = Colors.PRIMARY
+
+        advice_banner = ft.Container(
             content=ft.Row([
-                ft.Text("⚠️", size=18),
+                ft.Text(sug.get("icon", "💡"), size=18),
                 ft.Column([
-                    ft.Text("Cảnh báo kiệt sức", size=Typography.SMALL,
-                            color="#92400E", weight=Typography.BOLD),
-                    ft.Text(burnout["suggestions"][0], size=Typography.TINY,
-                            color="#92400E"),
+                    ft.Text(sug.get("title", ""), size=Typography.SMALL,
+                            color=title_color, weight=Typography.BOLD),
+                    ft.Text(sug.get("message", ""), size=Typography.TINY,
+                            color=Colors.TEXT_SECONDARY),
                 ], spacing=1, tight=True, expand=True),
             ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             padding=ft.Padding.symmetric(horizontal=Spacing.MD, vertical=Spacing.SM),
             border_radius=Radius.MD,
-            bgcolor="#FEF3C7",
-            border=ft.Border.all(1, "#FDE68A"),
+            bgcolor=banner_bg,
+            border=ft.Border.all(1, banner_border),
         )
 
     # ── Quick actions ────────────────────────────────────────
@@ -207,46 +258,41 @@ def build_dashboard(page: ft.Page, user, on_navigate):
 
     quick_actions = ft.Row([
         quick_action("📋", "Công việc",  Colors.PRIMARY, "tasks"),
+        quick_action("📁", "Dự án",      Colors.PRIMARY, "projects"),
         quick_action("📅", "Lịch biểu", Colors.PRIMARY, "calendar"),
         quick_action("📊", "Analytics",  Colors.PRIMARY, "report"),
-        quick_action("👤", "Tài khoản",  Colors.PRIMARY, "profile"),
     ], alignment=ft.MainAxisAlignment.SPACE_AROUND)
 
-    # ── AI Priority Tasks ────────────────────────────────────
-    def ai_task_item(task: Task, rank: int) -> ft.Container:
+    # ── Smart Schedule Timeline ──────────────────────────────
+    def schedule_item(slot: dict) -> ft.Container:
+        task = slot["task"]
         cat_info = CATEGORY_MAP.get(task.category, CATEGORY_MAP["personal"])
-        pri_info = PRIORITY_MAP.get(task.priority, PRIORITY_MAP["medium"])
-        score = getattr(task, "ai_priority_score", task.ai_priority_score)
-        score_color = Colors.ERROR if score >= 75 else Colors.WARNING if score >= 50 else Colors.SUCCESS
+        _block_colors = {"deep_work": Colors.PRIMARY, "quick_win": Colors.ACCENT_TEAL, "regular": Colors.SUCCESS}
+        score_color = _block_colors.get(slot["block_type"], Colors.SUCCESS)
+        start_h = slot["suggested_hour"]
+        end_h = start_h + max(1, slot["duration_minutes"] // 60)
 
         return ft.Container(
             content=ft.Row([
-                ft.Container(
-                    content=ft.Text(f"#{rank}", size=Typography.TINY,
-                                    color="white", weight=Typography.BOLD),
-                    width=28, height=28, border_radius=Radius.FULL,
-                    bgcolor=score_color, alignment=ft.Alignment.CENTER,
-                ),
-                ft.Container(width=Spacing.SM),
+                ft.Column([
+                    ft.Text(f"{start_h:02d}:00", size=Typography.SMALL, color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
+                    ft.Text(f"{end_h:02d}:00", size=Typography.TINY, color=Colors.TEXT_MUTED),
+                ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.END, width=45, spacing=2),
+                ft.Container(width=2, height=40, bgcolor=score_color, border_radius=Radius.FULL),
                 ft.Column([
                     ft.Text(task.title, size=Typography.BODY, color=Colors.TEXT_PRIMARY,
                             weight=Typography.MEDIUM, max_lines=1,
                             overflow=ft.TextOverflow.ELLIPSIS),
                     ft.Row([
                         ft.Text(cat_info["icon"], size=11),
-                        ft.Text(cat_info["label"], size=Typography.TINY, color=Colors.TEXT_MUTED),
+                        ft.Text(f"{slot['duration_minutes']} phút", size=Typography.TINY, color=Colors.TEXT_MUTED),
                         ft.Text("·", size=Typography.TINY, color=Colors.TEXT_MUTED),
-                        ft.Text(task.due_date_display, size=Typography.TINY,
-                                color=Colors.ERROR if task.is_overdue else Colors.TEXT_MUTED),
+                        ft.Text({"deep_work": "Deep Work", "quick_win": "Quick Win", "regular": "Regular"}.get(
+                            slot["block_type"], "Regular"), size=Typography.TINY, color=score_color),
                     ], spacing=4, tight=True),
                 ], spacing=2, expand=True, tight=True),
-                ft.Column([
-                    ft.Text(f"{score:.0f}", size=Typography.SMALL,
-                            color=score_color, weight=Typography.BOLD),
-                    ft.Text("AI score", size=8, color=Colors.TEXT_MUTED),
-                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=0, tight=True),
-            ], vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=0),
-            padding=ft.Padding.symmetric(vertical=Spacing.SM, horizontal=Spacing.MD),
+            ], vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=Spacing.SM),
+            padding=ft.Padding.symmetric(vertical=Spacing.SM, horizontal=Spacing.SM),
             border_radius=Radius.MD, bgcolor=Colors.BG_CARD,
             border=ft.Border.all(1, Colors.BORDER),
             margin=ft.Margin.only(bottom=Spacing.SM),
@@ -255,12 +301,12 @@ def build_dashboard(page: ft.Page, user, on_navigate):
         )
 
     ai_tasks_section = ft.Column([
-        section_header("🤖 AI Ưu tiên hôm nay",
-                       "Xếp hạng thông minh theo AI score",
+        section_header("✨ AI Smart Schedule",
+                       "Lịch làm việc tối ưu năng lượng hôm nay",
                        "Tất cả", lambda _: on_navigate("tasks")),
         ft.Container(height=Spacing.SM),
         ft.Column(
-            [ai_task_item(t, i+1) for i, t in enumerate(ai_ranked)] if ai_ranked
+            [schedule_item(slot) for slot in schedule_slots] if schedule_slots
             else [ft.Text("🎉 Không có việc cần làm!", size=Typography.BODY,
                           color=Colors.TEXT_MUTED, text_align=ft.TextAlign.CENTER)],
             spacing=0, tight=True,
@@ -318,10 +364,11 @@ def build_dashboard(page: ft.Page, user, on_navigate):
         header,
         ft.Container(
             content=ft.Column([
+                *([] if checkin_card is None else [checkin_card, ft.Container(height=Spacing.SM)]),
                 overview_card,
                 ft.Container(height=Spacing.SM),
                 ai_insights_card,
-                *([] if not burnout_banner else [ft.Container(height=Spacing.SM), burnout_banner]),
+                *([] if not advice_banner else [ft.Container(height=Spacing.SM), advice_banner]),
                 ft.Container(height=Spacing.LG),
                 quick_actions,
                 ft.Container(height=Spacing.LG),
@@ -347,16 +394,114 @@ def _mini_stat(value: str, label: str, color: str) -> ft.Column:
     ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=0, tight=True)
 
 
+def _build_checkin_card(page: ft.Page, user) -> ft.Container | None:
+    """Returns check-in card if not yet done today, otherwise None."""
+    from core.services import AIMemoryService, BehaviorService
+    today_str = date.today().isoformat()
+    last_checkin = AIMemoryService.recall_value(user.id, "state", "last_checkin_date")
+    if last_checkin == today_str:
+        return None
+
+    state = {"energy": 7, "mood": 3, "submitted": False}
+    card_ref = ft.Ref[ft.Container]()
+
+    energy_display = ft.Text("7", size=Typography.H4, color=Colors.PRIMARY,
+                             weight=Typography.BOLD, width=24,
+                             text_align=ft.TextAlign.CENTER)
+    mood_display   = ft.Text("3", size=Typography.H4, color=Colors.SUCCESS,
+                             weight=Typography.BOLD, width=24,
+                             text_align=ft.TextAlign.CENTER)
+
+    energy_slider = ft.Slider(
+        min=1, max=10, divisions=9, value=7,
+        active_color=Colors.PRIMARY, thumb_color=Colors.PRIMARY,
+        on_change=lambda e: _on_energy(e),
+    )
+    mood_slider = ft.Slider(
+        min=1, max=5, divisions=4, value=3,
+        active_color=Colors.SUCCESS, thumb_color=Colors.SUCCESS,
+        on_change=lambda e: _on_mood(e),
+    )
+
+    def _on_energy(e):
+        state["energy"] = int(e.control.value)
+        energy_display.value = str(state["energy"])
+        page.update()
+
+    def _on_mood(e):
+        state["mood"] = int(e.control.value)
+        mood_display.value = str(state["mood"])
+        page.update()
+
+    def _submit(_):
+        if state["submitted"]:
+            return
+        state["submitted"] = True
+        energy = state["energy"]
+        mood   = state["mood"]
+        AIMemoryService.remember(user.id, "state", "estimated_energy", energy, 0.9)
+        AIMemoryService.remember(user.id, "state", "estimated_mood",   mood,   0.9)
+        AIMemoryService.remember(user.id, "state", "last_checkin_date", today_str, 1.0)
+        BehaviorService.log(user.id, "daily_checkin", {"energy": energy, "mood": mood})
+        if card_ref.current:
+            card_ref.current.visible = False
+            page.update()
+
+    return ft.Container(
+        ref=card_ref,
+        content=ft.Column([
+            ft.Row([
+                ft.Text("☀️", size=18),
+                ft.Text("Check-in buổi sáng", size=Typography.H4,
+                        color=Colors.TEXT_PRIMARY, weight=Typography.BOLD, expand=True),
+                ft.TextButton(
+                    "Bỏ qua",
+                    on_click=_submit,
+                    style=ft.ButtonStyle(color=Colors.TEXT_MUTED,
+                                         padding=ft.Padding.all(0)),
+                ),
+            ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ft.Text("Hôm nay bạn thế nào?", size=Typography.TINY, color=Colors.TEXT_MUTED),
+            ft.Container(height=Spacing.SM),
+            ft.Row([
+                ft.Text("⚡ Năng lượng", size=Typography.SMALL, color=Colors.TEXT_SECONDARY,
+                        width=100),
+                energy_slider,
+                energy_display,
+            ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ft.Row([
+                ft.Text("😊 Tâm trạng", size=Typography.SMALL, color=Colors.TEXT_SECONDARY,
+                        width=100),
+                mood_slider,
+                mood_display,
+            ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ft.Container(height=Spacing.XS),
+            primary_button("Bắt đầu ngày mới 🚀", on_click=_submit, height=44),
+        ], spacing=4, tight=True),
+        padding=Spacing.MD,
+        border_radius=Radius.LG,
+        bgcolor=Colors.BG_CARD,
+        border=ft.Border.all(1, Colors.PRIMARY_BORDER),
+        shadow=ft.BoxShadow(blur_radius=12, color=Colors.PRIMARY_SHADOW,
+                            offset=ft.Offset(0, 3)),
+    )
+
+
 def _insight_chip(icon: str, label: str, value: str, color: str) -> ft.Container:
+    # Flet uses ARGB (#AARRGGBB).
+    # Convert "#RRGGBB" to "#15RRGGBB" (15 hex is ~8% opacity, 20 is ~12%)
+    bg_color = f"#20{color[1:]}" if color.startswith("#") else color
+    border_color = f"#40{color[1:]}" if color.startswith("#") else color
+    
     return ft.Container(
         content=ft.Column([
             ft.Text(icon, size=18, text_align=ft.TextAlign.CENTER),
             ft.Text(value, size=Typography.TINY, color=color,
                     weight=Typography.BOLD, text_align=ft.TextAlign.CENTER),
-            ft.Text(label, size=8, color=Colors.TEXT_MUTED, text_align=ft.TextAlign.CENTER),
+            ft.Text(label, size=10, color=Colors.TEXT_MUTED, text_align=ft.TextAlign.CENTER),
         ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2, tight=True),
         padding=ft.Padding.symmetric(horizontal=Spacing.SM, vertical=Spacing.SM),
-        border_radius=Radius.MD, bgcolor=color + "15",
-        border=ft.Border.all(1, color + "40"),
+        border_radius=Radius.MD, bgcolor=bg_color,
+        border=ft.Border.all(1, border_color),
         expand=True,
     )

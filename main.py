@@ -35,10 +35,10 @@ def main(page: ft.Page):
     # ── Navigation bar ────────────────────────────────────────
     # 4 regular tabs — report is merged into Profile
     NAV_ITEMS = [
-        ("dashboard", ft.Icons.HOME_ROUNDED,           ft.Icons.HOME_OUTLINED,           "Home"),
-        ("tasks",     ft.Icons.CHECK_CIRCLE_ROUNDED,   ft.Icons.CHECK_CIRCLE_OUTLINE,    "Tasks"),
-        ("calendar",  ft.Icons.CALENDAR_MONTH_ROUNDED, ft.Icons.CALENDAR_MONTH_OUTLINED, "Lịch"),
-        ("profile",   ft.Icons.PERSON_ROUNDED,         ft.Icons.PERSON_OUTLINED,         "Profile"),
+        ("dashboard", ft.Icons.HOME_ROUNDED,              ft.Icons.HOME_OUTLINED,              "Home"),
+        ("tasks",     ft.Icons.CHECK_CIRCLE_ROUNDED,      ft.Icons.CHECK_CIRCLE_OUTLINE,       "Tasks"),
+        ("insights",  ft.Icons.INSIGHTS_ROUNDED,          ft.Icons.INSIGHTS_OUTLINED,          "Insights"),
+        ("profile",   ft.Icons.PERSON_ROUNDED,            ft.Icons.PERSON_OUTLINED,            "Profile"),
     ]
 
     def build_nav_item(tab_id, icon_active, icon_idle, label):
@@ -109,6 +109,7 @@ def main(page: ft.Page):
                 build_nav_item(*NAV_ITEMS[3]),
             ], spacing=0,
                vertical_alignment=ft.CrossAxisAlignment.END),
+
             height=64,
             bgcolor="#FFFFFF",
             border=ft.Border(top=ft.BorderSide(1, Colors.BORDER)),
@@ -135,6 +136,7 @@ def main(page: ft.Page):
         from screens.report_screen    import build_report_screen
         from screens.profile_screen   import build_profile_screen
         from screens.ai_screen        import build_ai_screen
+        from screens.insights_screen  import build_insights_screen
         
         try:
             from screens.settings_screen  import build_settings_screen
@@ -146,11 +148,15 @@ def main(page: ft.Page):
         except ImportError:
             build_task_edit_screen = None
 
+        from screens.projects_screen import build_projects_screen
+
         builders = {
             "dashboard": lambda: build_dashboard(page, user, navigate),
             "tasks":     lambda: build_tasks_screen(page, user, navigate),
             "calendar":  lambda: build_calendar_screen(page, user, navigate),
             "report":    lambda: build_report_screen(page, user, navigate),
+            "insights":  lambda: build_insights_screen(page, user, navigate),
+            "projects":  lambda: build_projects_screen(page, user, navigate),
             "profile":   lambda: build_profile_screen(page, user, navigate, on_logout=logout_user),
             "ai":        lambda: build_ai_screen(page, user, navigate),
             "settings":  lambda: build_settings_screen(page, user, navigate, on_logout=logout_user) if build_settings_screen else build_dashboard(page, user, navigate),
@@ -176,10 +182,30 @@ def main(page: ft.Page):
         def on_login(user):
             current_user["u"] = user
             active_tab["t"] = "dashboard"
-            show_main_app()
+            from core.services import AIMemoryService
+            onboarding_done = AIMemoryService.recall_value(user.id, "system", "onboarding_done")
+            if not onboarding_done:
+                show_onboarding(user)
+            else:
+                show_main_app()
 
         page.controls.clear()
         page.controls.append(wrap_in_phone(build_auth_screen(page, on_login), include_navbar=False))
+        page.update()
+
+    def show_onboarding(user):
+        from screens.onboarding_screen import build_onboarding_screen
+
+        def on_complete():
+            show_main_app()
+
+        page.controls.clear()
+        page.controls.append(
+            wrap_in_phone(
+                build_onboarding_screen(page, user, on_complete),
+                include_navbar=False,
+            )
+        )
         page.update()
 
     def logout_user():
@@ -239,18 +265,51 @@ def main(page: ft.Page):
         )
         navigate("dashboard")
 
-    # ── Notification Loop ─────────────────────────────────────
+    # ── Background Workers ────────────────────────────────────
     import threading, time
     from datetime import datetime
     _notified = set()
-    
+
+    # ── Setup EventBus handlers ───────────────────────────────
+    try:
+        from core.intelligence.event_bus import EventBus, Events
+
+        def _on_task_completed(event):
+            uid = event["data"].get("user_id")
+            if uid:
+                try:
+                    from core.services import AIMemoryService
+                    AIMemoryService.update_from_behavior(uid)
+                except Exception:
+                    pass
+
+        def _on_session_ended(event):
+            uid = event["data"].get("user_id")
+            if uid:
+                try:
+                    from core.services import AIMemoryService
+                    AIMemoryService.update_from_behavior(uid)
+                except Exception:
+                    pass
+
+        bus = EventBus.get_instance()
+        bus.subscribe(Events.TASK_COMPLETED, _on_task_completed)
+        bus.subscribe(Events.SESSION_ENDED, _on_session_ended)
+    except Exception as e:
+        print(f"[EventBus] Setup error: {e}")
+
     def _notification_worker():
+        tick = 0
         while True:
             time.sleep(10)
+            tick += 1
             if current_user["u"]:
+                uid = current_user["u"].id
+
+                # Notification check every 10s
                 try:
                     from core.services import TaskService
-                    due_tasks = TaskService.check_reminders(current_user["u"].id, _notified)
+                    due_tasks = TaskService.check_reminders(uid, _notified)
                     for t in due_tasks:
                         try:
                             from plyer import notification
@@ -260,15 +319,14 @@ def main(page: ft.Page):
                                 app_name="TaskFlow",
                                 timeout=10
                             )
-                        except Exception as e:
-                            print("Plyer Error:", e)
+                        except Exception:
+                            pass
                         try:
                             def show_snack(task_title):
                                 sb = ft.SnackBar(
-                                    content=ft.Text(f"🔔 Nhắc nhở tới hạn: {task_title}", color="white", weight=ft.FontWeight.BOLD),
-                                    bgcolor="#F59E0B",
-                                    duration=5000
-                                )
+                                    content=ft.Text(f"🔔 Nhắc nhở tới hạn: {task_title}",
+                                                    color="white", weight=ft.FontWeight.BOLD),
+                                    bgcolor="#F59E0B", duration=5000)
                                 page.overlay.append(sb)
                                 sb.open = True
                                 page.update()
@@ -276,6 +334,14 @@ def main(page: ft.Page):
                         except Exception:
                             pass
                 except Exception:
+                    pass
+
+                # AI Memory update every 5 minutes (30 ticks)
+                if tick % 30 == 0:
+                    try:
+                        from core.services import AIMemoryService
+                        AIMemoryService.update_from_behavior(uid)
+                    except Exception:
                         pass
 
     threading.Thread(target=_notification_worker, daemon=True).start()

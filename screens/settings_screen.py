@@ -17,7 +17,12 @@ def build_settings_screen(page: ft.Page, user, on_navigate, on_logout):
     def save_profile(_):
         new_name = tf_name.value.strip() or user.username
         AuthService.update_profile(user, new_name, sel_color["v"])
-        # Update UI avatar circle color
+        if tf_work_start.value and ":" in tf_work_start.value:
+            user.work_start = tf_work_start.value.strip()
+        if tf_work_end.value and ":" in tf_work_end.value:
+            user.work_end = tf_work_end.value.strip()
+        from core.database import Storage
+        Storage.save_user(user)
         avatar_placeholder.content = avatar_circle(user.full_name, user.avatar_color, 80)
         snack(page, "Đã cập nhật tài khoản ✓")
         page.update()
@@ -67,9 +72,29 @@ def build_settings_screen(page: ft.Page, user, on_navigate, on_logout):
     color_pickers = [color_circle(c) for c in AVATAR_COLORS]
 
     tf_name = ft.TextField(
-        label="Họ và tên", value=user.full_name, bgcolor=Colors.BG_INPUT, border_color=Colors.BORDER,
+        label="Ho va ten", value=user.full_name, bgcolor=Colors.BG_INPUT, border_color=Colors.BORDER,
         focused_border_color=Colors.PRIMARY, text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY),
         label_style=ft.TextStyle(color=Colors.TEXT_SECONDARY), border_radius=Radius.MD, cursor_color=Colors.PRIMARY,
+    )
+    tf_work_start = ft.TextField(
+        label="Bắt đầu làm việc", hint_text="08:00",
+        value=getattr(user, "work_start", "08:00"),
+        width=150, text_size=Typography.SMALL,
+        bgcolor=Colors.BG_INPUT, border_color=Colors.BORDER,
+        focused_border_color=Colors.PRIMARY,
+        text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY),
+        label_style=ft.TextStyle(color=Colors.TEXT_SECONDARY),
+        border_radius=Radius.MD, cursor_color=Colors.PRIMARY,
+    )
+    tf_work_end = ft.TextField(
+        label="Kết thúc làm việc", hint_text="18:00",
+        value=getattr(user, "work_end", "18:00"),
+        width=150, text_size=Typography.SMALL,
+        bgcolor=Colors.BG_INPUT, border_color=Colors.BORDER,
+        focused_border_color=Colors.PRIMARY,
+        text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY),
+        label_style=ft.TextStyle(color=Colors.TEXT_SECONDARY),
+        border_radius=Radius.MD, cursor_color=Colors.PRIMARY,
     )
 
     tf_old_pwd = ft.TextField(label="Mật khẩu cũ", password=True, can_reveal_password=True,
@@ -148,6 +173,12 @@ def build_settings_screen(page: ft.Page, user, on_navigate, on_logout):
                         info_row("📧", "Email", user.email),
                         ft.Container(height=Spacing.MD),
                         tf_name,
+                        ft.Container(height=Spacing.SM),
+                        ft.Row([
+                            tf_work_start,
+                            ft.Text("—", color=Colors.TEXT_MUTED),
+                            tf_work_end,
+                        ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                         ft.Container(height=Spacing.MD),
                         primary_button("Lưu thay đổi", on_click=save_profile, icon=ft.Icons.SAVE_OUTLINED, height=44),
                     ], spacing=0, tight=True)

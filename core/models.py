@@ -22,6 +22,25 @@ class User:
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     settings: dict = field(default_factory=dict)
 
+    # ── AI Productivity Fields ────────────────────────────────────────────────
+    work_style: str = "balanced"
+    focus_hours: int = 4
+    sleep_time: str = "23:00"
+    wake_time: str = "07:00"
+    peak_productivity_hours: str = "[9,10,14,15]"
+    stress_level: int = 5
+    energy_level: int = 7
+    preferred_work_duration: int = 50
+    break_duration: int = 10
+
+    # ── Context Fields ─────────────────────────────────────────────────────
+    timezone: str = "Asia/Ho_Chi_Minh"
+    work_start: str = "08:00"
+    work_end: str = "18:00"
+    role: str = "other"
+    work_env: str = "remote"
+    deadline_sensitivity: str = "medium"
+
     def to_dict(self):
         return asdict(self)
 
@@ -67,6 +86,13 @@ class Task:
     actual_minutes: int = 0           # Thực tế đã dành (tính từ work_sessions)
     workload_score: float = 5.0       # Workload tổng hợp: calculated by AI engine
     ai_priority_score: float = 50.0   # Dynamic priority score từ AI: 0-100
+    
+    # ── AI Behavior Fields ────────────────────────────────────────────────────
+    postpone_count: int = 0           # Số lần delay/postpone
+    interruption_count: int = 0       # Số lần bị gián đoạn khi làm
+    focus_score: float = 0.0          # Điểm tập trung khi làm task này
+    deadline_type: str = "soft"       # hard / soft / estimated
+    project_id: Optional[str] = None  # ID project thuộc về
 
     def to_dict(self):
         return asdict(self)
@@ -160,3 +186,52 @@ class AIMemory:
 
     def to_dict(self):
         return asdict(self)
+
+
+# ─── ProductivityLog ──────────────────────────────────────────────────────────
+
+@dataclass
+class ProductivityLog:
+    """Theo dõi hiệu suất từng ngày của user."""
+    id: Optional[int]
+    user_id: str
+    date: str                         # ISO date
+    productivity_score: float = 0.0
+    burnout_risk: float = 0.0
+    focus_time_minutes: int = 0
+    completed_tasks_count: int = 0
+
+    def to_dict(self):
+        return asdict(self)
+
+
+# ─── Project ──────────────────────────────────────────────────────────────────
+
+@dataclass
+class Project:
+    """Nhóm task theo du an / muc tieu lon."""
+    id: str
+    user_id: str
+    name: str
+    description: str = ""
+    color: str = "#5B4FBE"
+    status: str = "active"            # active / completed / paused
+    priority: str = "medium"
+    due_date: Optional[str] = None
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    def to_dict(self):
+        return asdict(self)
+
+    @staticmethod
+    def from_dict(d: dict) -> "Project":
+        import dataclasses
+        valid_keys = {f.name for f in dataclasses.fields(Project)}
+        return Project(**{k: v for k, v in d.items() if k in valid_keys})
+
+    @property
+    def is_overdue(self) -> bool:
+        if self.due_date and self.status != "completed":
+            return date.fromisoformat(self.due_date) < date.today()
+        return False

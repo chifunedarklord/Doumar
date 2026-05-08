@@ -1,6 +1,6 @@
 """
-TaskFlow - Services Layer
-Chứa toàn bộ business logic của ứng dụng.
+TaskFlow - Services Layer (Upgraded)
+Tích hợp toàn bộ intelligence engines vào business logic.
 """
 import bcrypt
 import uuid
@@ -111,23 +111,64 @@ class TaskService:
         if priority != "all":
             tasks = [t for t in tasks if t.priority == priority]
 
+        # Sort by ai_priority_score descending
         def sort_key(t):
-            return (0 if t.is_overdue else 1, t.due_date or "9999",
-                    {"high": 0, "medium": 1, "low": 2}.get(t.priority, 1))
-
+            return -getattr(t, "ai_priority_score", 50.0)
         return sorted(tasks, key=sort_key)
 
     @staticmethod
     def save_task(task: Task):
-        # Auto-calculate workload score
+        # Calculate workload score
         energy_map = {"low": 3, "medium": 5, "high": 8}
-        focus_map  = {"low": 3, "medium": 5, "high": 8}
+        focus_map = {"low": 3, "medium": 5, "high": 8}
         task.workload_score = round(
             (energy_map.get(task.energy_required, 5) +
              focus_map.get(task.focus_required, 5) +
              task.difficulty_level) / 3, 1
         )
+
+        # Recalculate AI priority score using adaptive engine
+        try:
+            from core.intelligence.priority_engine import AdaptivePriorityEngine
+            sessions = Storage.get_work_sessions(task.user_id, 50)
+            events = Storage.get_behavior_events(task.user_id, limit=200)
+
+            from core.intelligence.behavior_learner import BehaviorLearner
+            peak_hours = BehaviorLearner.learn_peak_hours(events, sessions)
+            delay_patterns = BehaviorLearner.learn_delay_patterns(events)
+            energy_level = BehaviorLearner.estimate_current_energy(events, sessions)
+            stress_level = BehaviorLearner.estimate_stress_level(Storage.get_tasks(task.user_id), events)
+
+            ctx = {
+                "peak_hours": peak_hours,
+                "current_hour": datetime.now().hour,
+                "delay_risk": delay_patterns,
+                "energy_level": energy_level,
+                "stress_level": stress_level,
+            }
+            task.ai_priority_score = AdaptivePriorityEngine.calculate_score(task, ctx)
+        except Exception:
+            pass
+
         Storage.save_task(task)
+
+        # Publish event + invalidate AI context cache
+        try:
+            from core.intelligence.event_bus import EventBus, Events
+            EventBus.get_instance().publish(Events.ANALYTICS_UPDATE, {"user_id": task.user_id})
+        except Exception:
+            pass
+
+        try:
+            from utils.ai_helper import invalidate_context_cache
+            invalidate_context_cache(task.user_id)
+        except Exception:
+            pass
+
+        try:
+            AnalyticsService.invalidate_cache(task.user_id)
+        except Exception:
+            pass
 
     @staticmethod
     def delete_task(task_id: str):
@@ -144,6 +185,14 @@ class TaskService:
                 "priority": task.priority, "title": task.title,
                 "estimated_minutes": task.estimated_minutes,
             })
+            # Trigger memory update in background
+            try:
+                from core.intelligence.event_bus import EventBus, Events
+                EventBus.get_instance().publish(Events.TASK_COMPLETED, {
+                    "user_id": task.user_id, "task_id": task.id
+                })
+            except Exception:
+                pass
         else:
             task.completed_at = None
         Storage.save_task(task)
@@ -151,7 +200,6 @@ class TaskService:
 
     @staticmethod
     def mark_delayed(task: Task, reason: str = ""):
-        """Ghi nhận task bị trì hoãn."""
         BehaviorService.log(task.user_id, "task_delay", {
             "task_id": task.id, "category": task.category,
             "priority": task.priority, "reason": reason,
@@ -161,11 +209,11 @@ class TaskService:
     def get_stats(user_id: str) -> dict:
         tasks = Storage.get_tasks(user_id)
         today_str = date.today().isoformat()
-        total   = len(tasks)
-        done    = sum(1 for t in tasks if t.status == "done")
+        total = len(tasks)
+        done = sum(1 for t in tasks if t.status == "done")
         in_prog = sum(1 for t in tasks if t.status == "in_progress")
         overdue = sum(1 for t in tasks if t.is_overdue)
-        today   = [t for t in tasks if t.due_date == today_str and t.status != "done"]
+        today = [t for t in tasks if t.due_date == today_str and t.status != "done"]
         return {
             "total": total, "done": done, "in_prog": in_prog,
             "overdue": overdue, "today": today,
@@ -193,6 +241,12 @@ class TaskService:
                     except Exception:
                         pass
         return due_now
+
+    @staticmethod
+    def split_task(task: Task) -> List[dict]:
+        """Auto-split task lớn thành subtasks."""
+        from core.intelligence.scheduling_engine import SchedulingEngine
+        return SchedulingEngine.auto_split_task(task)
 
 
 # ─── Chat Service ─────────────────────────────────────────────────────────────
@@ -241,16 +295,54 @@ class BehaviorService:
 
     @staticmethod
     def get_peak_hours(user_id: str) -> List[int]:
-        from core.ai_engine import BehaviorAnalyzer
-        events = Storage.get_behavior_events(user_id, "task_complete", 200)
-        return BehaviorAnalyzer.get_peak_hours(events)
+        from core.intelligence.behavior_learner import BehaviorLearner
+        events = Storage.get_behavior_events(user_id, limit=300)
+        sessions = Storage.get_work_sessions(user_id, limit=100)
+        return BehaviorLearner.learn_peak_hours(events, sessions)
 
     @staticmethod
     def get_productivity_score(user_id: str) -> float:
-        from core.ai_engine import BehaviorAnalyzer
+        from core.intelligence.behavior_learner import BehaviorLearner
         tasks = Storage.get_tasks(user_id)
         events = Storage.get_behavior_events(user_id, limit=200)
-        return BehaviorAnalyzer.calc_weekly_score(tasks, events)
+        return BehaviorLearner.calc_weekly_productivity_score(tasks, events)
+
+    @staticmethod
+    def get_user_context(user_id: str) -> dict:
+        """Build full user context for AI engines.
+        Ưu tiên check-in hôm nay cho energy/stress, survey data cho peak hours."""
+        from core.intelligence.behavior_learner import BehaviorLearner
+        events = Storage.get_behavior_events(user_id, limit=300)
+        sessions = Storage.get_work_sessions(user_id, limit=100)
+        tasks = Storage.get_tasks(user_id)
+
+        # Peak hours: dùng survey khi chưa đủ behavior data
+        learned_peak = BehaviorLearner.learn_peak_hours(events, sessions)
+        survey_peak  = Storage.get_memory_value(user_id, "preference", "peak_hours", None)
+        meaningful   = [e for e in events if e.get("event_type") in
+                        ("task_complete", "task_start", "session_start")]
+        peak_hours = learned_peak if (len(meaningful) >= 20 or survey_peak is None) else (
+            survey_peak if isinstance(survey_peak, list) else learned_peak
+        )
+
+        delay_patterns = BehaviorLearner.learn_delay_patterns(events)
+
+        # Energy/stress: ưu tiên check-in hôm nay
+        checkin_energy = Storage.get_memory_value(user_id, "state", "estimated_energy", None)
+        checkin_stress = Storage.get_memory_value(user_id, "state", "estimated_stress", None)
+        energy_level = (int(checkin_energy) if checkin_energy is not None
+                        else BehaviorLearner.estimate_current_energy(events, sessions))
+        stress_level = (int(checkin_stress) if checkin_stress is not None
+                        else BehaviorLearner.estimate_stress_level(tasks, events))
+
+        return {
+            "peak_hours": peak_hours,
+            "current_hour": datetime.now().hour,
+            "delay_risk": delay_patterns,
+            "energy_level": energy_level,
+            "stress_level": stress_level,
+            "user_id": user_id,
+        }
 
 
 # ─── Work Session Service ─────────────────────────────────────────────────────
@@ -278,12 +370,12 @@ class WorkSessionService:
         ws.duration_minutes = int((end - start).total_seconds() / 60)
         ws.focus_quality = max(1, min(10, focus_quality))
 
-        # Update actual_minutes on task
         if ws.task_id:
             tasks = Storage.get_tasks(ws.user_id)
             for t in tasks:
                 if t.id == ws.task_id:
                     t.actual_minutes = (t.actual_minutes or 0) + ws.duration_minutes
+                    t.interruption_count = getattr(t, "interruption_count", 0)
                     Storage.save_task(t)
                     break
 
@@ -293,6 +385,41 @@ class WorkSessionService:
             "duration_minutes": ws.duration_minutes,
             "focus_quality": ws.focus_quality,
         })
+
+        # Write estimated energy/stress back to AIMemory after each session
+        try:
+            from core.intelligence.behavior_learner import BehaviorLearner
+            events = Storage.get_behavior_events(ws.user_id, limit=200)
+            all_sessions = Storage.get_work_sessions(ws.user_id, limit=50)
+            tasks = Storage.get_tasks(ws.user_id)
+            estimated_energy = BehaviorLearner.estimate_current_energy(events, all_sessions)
+            estimated_stress = BehaviorLearner.estimate_stress_level(tasks, events)
+            Storage.set_memory(ws.user_id, "state", "estimated_energy", estimated_energy, 0.8)
+            Storage.set_memory(ws.user_id, "state", "estimated_stress", estimated_stress, 0.8)
+            # Sync back to User model so all direct reads see live values
+            try:
+                all_users = Storage.get_users()
+                user_obj = next((u for u in all_users if u.id == ws.user_id), None)
+                if user_obj:
+                    user_obj.energy_level = max(1, min(10, int(estimated_energy)))
+                    user_obj.stress_level = max(1, min(10, int(estimated_stress)))
+                    Storage.save_user(user_obj)
+            except Exception as sync_err:
+                print(f"[WorkSession] User sync failed: {sync_err}")
+        except Exception:
+            pass
+
+        # Trigger memory update
+        try:
+            from core.intelligence.event_bus import EventBus, Events
+            EventBus.get_instance().publish(Events.SESSION_ENDED, {
+                "user_id": ws.user_id,
+                "duration": ws.duration_minutes,
+                "quality": ws.focus_quality,
+            })
+        except Exception:
+            pass
+
         return ws
 
     @staticmethod
@@ -305,55 +432,118 @@ class WorkSessionService:
 class AnalyticsService:
     """Tổng hợp analytics AI-powered cho user."""
 
-    @staticmethod
-    def get_full_report(user_id: str) -> dict:
-        from core.ai_engine import BehaviorAnalyzer, BurnoutDetector, RecommendationEngine
+    _cache = {}
+    _CACHE_TTL = 60  # Cache report trong 60 giây
+
+    @classmethod
+    def get_full_report(cls, user_id: str) -> dict:
+        import time
+        now = time.time()
+        cached = cls._cache.get(user_id)
+        if cached and now - cached['timestamp'] < cls._CACHE_TTL:
+            return cached['data']
+
+        from core.intelligence.burnout_intelligence import BurnoutIntelligence
+        from core.intelligence.productivity_intelligence import ProductivityIntelligence
+        from core.intelligence.recommendation_engine import RecommendationEngine
+        from core.intelligence.focus_engine import FocusEngine
+        from core.intelligence.behavior_learner import BehaviorLearner
+        from core.intelligence.behavioral_analytics import BehavioralAnalytics
 
         tasks = Storage.get_tasks(user_id)
         events = Storage.get_behavior_events(user_id, limit=500)
         sessions = Storage.get_work_sessions(user_id, limit=100)
 
-        peak_hours = BehaviorAnalyzer.get_peak_hours(events)
-        productivity_by_hour = BehaviorAnalyzer.get_productivity_by_hour(events)
-        delay_patterns = BehaviorAnalyzer.get_delay_patterns(events)
-        daily_productivity = BehaviorAnalyzer.calc_daily_productivity(tasks, 7)
-        weekly_score = BehaviorAnalyzer.calc_weekly_score(tasks, events)
-        burnout = BurnoutDetector.get_risk(tasks, sessions, events)
-        suggestions = RecommendationEngine.get_suggestions(tasks, events, burnout, peak_hours)
+        # Build user context — survey data as baseline until enough behavior events
+        learned_peak_hours = BehaviorLearner.learn_peak_hours(events, sessions)
+        survey_peak_hours  = Storage.get_memory_value(user_id, "preference", "peak_hours", None)
+        meaningful_events  = [e for e in events if e.get("event_type") in
+                              ("task_complete", "task_start", "session_start")]
+        if len(meaningful_events) >= 20 or survey_peak_hours is None:
+            peak_hours = learned_peak_hours
+        else:
+            if isinstance(survey_peak_hours, list):
+                peak_hours = survey_peak_hours
+            else:
+                try:
+                    import json as _json
+                    peak_hours = _json.loads(survey_peak_hours)
+                except Exception:
+                    peak_hours = learned_peak_hours
 
-        # Basic stats
-        total  = len(tasks)
-        done   = sum(1 for t in tasks if t.status == "done")
+        delay_patterns = BehaviorLearner.learn_delay_patterns(events)
+
+        # Prefer today's check-in over computed values
+        checkin_energy = Storage.get_memory_value(user_id, "state", "estimated_energy", None)
+        checkin_stress = Storage.get_memory_value(user_id, "state", "estimated_stress", None)
+        energy_level = (int(checkin_energy) if checkin_energy is not None
+                        else BehaviorLearner.estimate_current_energy(events, sessions))
+        stress_level = (int(checkin_stress) if checkin_stress is not None
+                        else BehaviorLearner.estimate_stress_level(tasks, events))
+
+        weekly_score = BehaviorLearner.calc_weekly_productivity_score(tasks, events)
+
+        ctx = {
+            "peak_hours": peak_hours,
+            "current_hour": datetime.now().hour,
+            "delay_risk": delay_patterns,
+            "energy_level": energy_level,
+            "stress_level": stress_level,
+            "user_id": user_id,
+        }
+
+        burnout = BurnoutIntelligence.get_risk(tasks, sessions, events)
+        productivity = ProductivityIntelligence.get_full_report(tasks, sessions, events)
+        focus_analysis = FocusEngine.analyze_focus_quality(sessions)
+        focus_heatmap = FocusEngine.get_focus_heatmap(sessions)
+        pomodoro = FocusEngine.suggest_optimal_pomodoro(sessions)
+        behavior_analytics = BehavioralAnalytics.run_all(tasks, events, sessions)
+        recommendations = RecommendationEngine.get_recommendations(
+            tasks, events, sessions, burnout, ctx, behavior_analytics
+        )
+
+        total = len(tasks)
+        done = sum(1 for t in tasks if t.status == "done")
         overdue = sum(1 for t in tasks if t.is_overdue)
         active = [t for t in tasks if t.status not in ("done", "cancelled")]
-        completion_rate = int(done / total * 100) if total else 0
 
-        # Focus time (from sessions last 7 days)
-        today = date.today()
-        week_ago = (today - __import__("datetime").timedelta(days=7)).isoformat()
-        recent_sessions = [s for s in sessions if s.get("started_at", "") >= week_ago]
-        total_focus_min = sum(s.get("duration_minutes", 0) for s in recent_sessions)
-
-        # Cache the result
+        # Cache key metrics
         Storage.set_analytics(user_id, "weekly_score", weekly_score)
         Storage.set_analytics(user_id, "burnout_level", burnout["level"])
         Storage.set_analytics(user_id, "peak_hours", peak_hours)
 
-        return {
+        report_data = {
             "total_tasks": total,
             "done_tasks": done,
             "overdue_tasks": overdue,
             "active_tasks": len(active),
-            "completion_rate": completion_rate,
+            "completion_rate": int(done / total * 100) if total else 0,
             "weekly_score": weekly_score,
             "burnout": burnout,
             "peak_hours": peak_hours,
-            "productivity_by_hour": productivity_by_hour,
+            "energy_level": energy_level,
+            "stress_level": stress_level,
+            "productivity": productivity,
+            "focus_analysis": focus_analysis,
+            "focus_heatmap": focus_heatmap,
+            "optimal_pomodoro": pomodoro,
+            "daily_productivity": productivity.get("daily_productivity", []),
+            "recommendations": recommendations,
             "delay_patterns": delay_patterns,
-            "daily_productivity": daily_productivity,
-            "total_focus_minutes": total_focus_min,
-            "suggestions": suggestions,
+            "total_focus_minutes": int(focus_analysis.get("total_focus_hours", 0) * 60),
+            "suggestions": [r.get("message", "") for r in recommendations],
+            "deadline_compliance": behavior_analytics["deadline_compliance"],
+            "estimation_accuracy": behavior_analytics["estimation_accuracy"],
+            "procrastination": behavior_analytics["procrastination"],
+            "workload": behavior_analytics["workload"],
         }
+
+        cls._cache[user_id] = {'timestamp': time.time(), 'data': report_data}
+        return report_data
+
+    @classmethod
+    def invalidate_cache(cls, user_id: str):
+        cls._cache.pop(user_id, None)
 
 
 # ─── AI Memory Service ────────────────────────────────────────────────────────
@@ -377,23 +567,53 @@ class AIMemoryService:
     @staticmethod
     def update_from_behavior(user_id: str):
         """Cập nhật AI memory từ behavior data."""
-        peak_hours = BehaviorService.get_peak_hours(user_id)
-        if peak_hours:
-            AIMemoryService.remember(user_id, "habit", "peak_hours", peak_hours, 0.8)
-
-        events = Storage.get_behavior_events(user_id, "task_complete", 50)
-        if len(events) >= 5:
-            avg_hour = sum(e.get("hour_of_day", 9) for e in events) / len(events)
-            AIMemoryService.remember(user_id, "habit", "avg_completion_hour",
-                                     round(avg_hour, 1), 0.75)
+        from core.intelligence.memory_engine import MemoryEngine
+        try:
+            tasks = Storage.get_tasks(user_id)
+            events = Storage.get_behavior_events(user_id, limit=300)
+            sessions = Storage.get_work_sessions(user_id, limit=100)
+            MemoryEngine.update_from_behavior(user_id, tasks, events, sessions)
+        except Exception as e:
+            print(f"[AIMemoryService] Error updating: {e}")
 
     @staticmethod
     def get_context_summary(user_id: str) -> str:
         """Tóm tắt AI memory thành text cho system prompt."""
-        memories = Storage.get_memory(user_id)
-        if not memories:
-            return ""
-        lines = ["BỘ NHỚ AI VỀ USER:"]
-        for m in memories[:10]:
-            lines.append(f"- [{m['memory_type']}] {m['key']}: {m['value']}")
-        return "\n".join(lines)
+        from core.intelligence.memory_engine import MemoryEngine
+        return MemoryEngine.get_context_summary(user_id)
+
+
+# ─── Project Service ──────────────────────────────────────────────────────────
+
+class ProjectService:
+    """CRUD + analytics cho Projects."""
+
+    @staticmethod
+    def get_projects(user_id: str) -> list:
+        return Storage.get_projects(user_id)
+
+    @staticmethod
+    def save_project(project) -> None:
+        Storage.save_project(project)
+
+    @staticmethod
+    def delete_project(project_id: str) -> None:
+        Storage.delete_project(project_id)
+
+    @staticmethod
+    def get_project_tasks(user_id: str, project_id: str) -> list:
+        all_tasks = Storage.get_tasks(user_id)
+        return [t for t in all_tasks if getattr(t, "project_id", None) == project_id]
+
+    @staticmethod
+    def get_project_stats(user_id: str, project_id: str) -> dict:
+        tasks = ProjectService.get_project_tasks(user_id, project_id)
+        total = len(tasks)
+        done = sum(1 for t in tasks if t.status == "done")
+        overdue = sum(1 for t in tasks if getattr(t, "is_overdue", False))
+        return {
+            "total": total,
+            "done": done,
+            "overdue": overdue,
+            "completion_rate": round(done / total * 100) if total else 0,
+        }

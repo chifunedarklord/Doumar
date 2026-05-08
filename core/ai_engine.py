@@ -346,6 +346,18 @@ class RecommendationEngine:
                 "priority": "high",
             })
 
+        # 3.5. Frequently postponed tasks
+        postponed = [t for t in active if getattr(t, "postpone_count", 0) >= 3]
+        if postponed:
+            ptask = postponed[0]
+            suggestions.append({
+                "type": "habit_warning",
+                "icon": "🔄",
+                "title": f"Bạn đã dời \"{ptask.title[:15]}...\" {ptask.postpone_count} lần!",
+                "message": "Task này đang có rào cản. Có muốn AI chia nó thành 4 subtask hoặc bỏ qua không?",
+                "priority": "high",
+            })
+
         # 4. Peak hour reminder
         current_hour = datetime.now().hour
         if peak_hours and current_hour in peak_hours:

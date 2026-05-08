@@ -37,9 +37,10 @@ def build_report_screen(page: ft.Page, user, on_navigate):
             }
 
         burnout   = report["burnout"]
-        peak_hrs  = report["peak_hours"]
+        peak_hrs  = report.get("peak_hours", [9,10,11])
         daily_prod = report.get("daily_productivity", [])
-        suggestions = report.get("suggestions", [])
+        # Use recommendations (list of dicts) not suggestions (list of strings)
+        suggestions = report.get("recommendations", [])
         focus_min = report.get("total_focus_minutes", 0)
         weekly_score = report.get("weekly_score", 0)
 
@@ -234,7 +235,7 @@ def build_report_screen(page: ft.Page, user, on_navigate):
             section_header("🤖 AI Gợi ý", f"{len(suggestions)} gợi ý thực tế"),
             ft.Container(height=Spacing.SM),
             ft.Column(
-                [sug_item(s) for s in suggestions] if suggestions else
+                [sug_item(s) for s in suggestions if isinstance(s, dict)] if suggestions else
                 [ft.Text("✅ Không có gợi ý đặc biệt!", size=Typography.SMALL, color=Colors.SUCCESS)],
                 spacing=0, tight=True,
             ),

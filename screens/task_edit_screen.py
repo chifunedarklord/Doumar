@@ -7,7 +7,7 @@ import uuid
 import threading
 from core.theme import Colors, Typography, Spacing, Radius
 from core.models import Task
-from core.services import TaskService
+from core.services import TaskService, ProjectService
 from components.widgets import snack
 
 def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
@@ -52,11 +52,15 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
         )
 
     # ── State ────────────────────────────────────────────
+    _user_projects = ProjectService.get_projects(user.id)
+    proj_sel = {"v": getattr(t, "project_id", None)}
+
     cat_sel = {"v": t.category}
     pri_sel = {"v": t.priority}
     sta_sel = {"v": t.status}
     rec_sel = {"v": t.recur_pattern if t.recur_pattern else "none"}
     cpl_sel = {"v": getattr(t, "complexity", "medium")}
+    dl_type_sel = {"v": getattr(t, "deadline_type", "soft")}
 
     tf_est = _tf("TG dự kiến (phút)", str(getattr(t, "estimated_minutes", 30)), hint="VD: 30", expand=1)
     tf_est.keyboard_type = ft.KeyboardType.NUMBER
@@ -291,6 +295,28 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
         ("hard", "Khó"),
     ], cpl_sel)
 
+    dl_type_chips = make_option_chips(
+        [("soft", "Mềm"), ("hard", "Cứng"), ("estimated", "Ước tính")],
+        dl_type_sel,
+    )
+
+    _proj_options = [ft.dropdown.Option(key="", text="— Không thuộc dự án —")]
+    _proj_options += [ft.dropdown.Option(key=p.id, text=p.name) for p in _user_projects]
+
+    proj_dropdown = ft.Dropdown(
+        label="Dự án",
+        value=proj_sel["v"] or "",
+        options=_proj_options,
+        bgcolor=Colors.BG_CARD,
+        border_color=Colors.BORDER,
+        focused_border_color=Colors.PRIMARY,
+        text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY, size=Typography.SMALL),
+        label_style=ft.TextStyle(color=Colors.TEXT_MUTED, size=Typography.SMALL),
+        border_radius=Radius.MD,
+        on_select=lambda e: proj_sel.update({"v": e.control.value or None}),
+        visible=len(_user_projects) > 0,
+    )
+
     # ── File Picker for OCR ──────────────────────────────
     def process_ocr_click(_e):
         def _run():
@@ -359,10 +385,24 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
             err_ref.current.value = "⚠️  Vui lòng nhập tiêu đề!"
             page.update()
             return
+            
+        # Check if task is postponed (due date changed to later date)
+        old_due_date = t.due_date
+        new_due_date = due_val["v"] or None
+        if is_edit and old_due_date and new_due_date:
+            try:
+                old_d = datetime.strptime(old_due_date, "%Y-%m-%d")
+                new_d = datetime.strptime(new_due_date, "%Y-%m-%d")
+                if new_d > old_d:
+                    t.postpone_count = getattr(t, "postpone_count", 0) + 1
+                    TaskService.mark_delayed(t, reason="User changed due date")
+            except Exception:
+                pass
+                
         t.title            = title
         t.description      = tf_desc.value.strip()
         t.start_date       = start_val["v"] or None
-        t.due_date         = due_val["v"] or None
+        t.due_date         = new_due_date
         t.due_time         = time_val["v"] or None
         t.category         = cat_sel["v"]
         t.priority         = pri_sel["v"]
@@ -371,6 +411,8 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
         t.recur_pattern    = "" if rec_sel["v"] == "none" else rec_sel["v"]
         t.reminder_minutes = int(rem_dropdown.value) if rem_dropdown.value else 0
         t.complexity       = cpl_sel["v"]
+        t.deadline_type    = dl_type_sel["v"]
+        t.project_id       = proj_sel["v"] or None
         t.estimated_minutes= int(tf_est.value) if tf_est.value and tf_est.value.isdigit() else 30
         t.notes            = tf_notes.value.strip()
         if t.status == "done" and not t.completed_at:
@@ -406,9 +448,11 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
             ft.Row([btn_start, ft.Container(width=Spacing.SM), btn_due]), ft.Container(height=Spacing.SM), ft.Row([btn_time]), _div(),
             
             _section_label("🏷️  PHÂN LOẠI"),
+            ft.Container(content=proj_dropdown, padding=ft.padding.symmetric(vertical=4)) if len(_user_projects) > 0 else ft.Container(),
             ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.FOLDER_OUTLINED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text("Danh mục", size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), cat_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
             ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.FLAG_OUTLINED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text("Độ ưu tiên", size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), pri_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
             ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.TERRAIN_ROUNDED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text("Độ phức tạp", size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), cpl_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
+            ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.LOCK_CLOCK_OUTLINED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text("Kiểu deadline", size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), dl_type_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
             ft.Container(content=tf_est, padding=ft.padding.symmetric(vertical=6)),
             _div(),
             
