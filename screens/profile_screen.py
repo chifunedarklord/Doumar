@@ -55,7 +55,7 @@ def build_profile_screen(page: ft.Page, user, on_navigate, on_logout=None):
             ),
         ], spacing=0, tight=True),
         padding=ft.Padding.symmetric(vertical=Spacing.MD, horizontal=Spacing.MD),
-        border_radius=Radius.LG, bgcolor=Colors.BG_CARD, border=ft.border.all(1, Colors.BORDER),
+        border_radius=Radius.LG, bgcolor=Colors.BG_CARD, border=ft.Border.all(1, Colors.BORDER),
         shadow=ft.BoxShadow(
             blur_radius=12,
             color="#00000018",
@@ -113,6 +113,74 @@ def build_profile_screen(page: ft.Page, user, on_navigate, on_logout=None):
         padding=Spacing.MD
     )
 
+    # ── Demo Data Button ──────────────────────────────────────
+    _seed_status = ft.Text("", size=Typography.TINY, color=Colors.TEXT_MUTED,
+                           text_align=ft.TextAlign.CENTER)
+
+    def _do_seed(_):
+        _seed_status.value = "Đang tạo dữ liệu mẫu…"
+        _seed_status.color = Colors.PRIMARY
+        page.update()
+        import threading as _t
+        def _run():
+            try:
+                from scripts.seed_demo_data import seed_for_user
+                msg = seed_for_user(user.id)
+                _seed_status.value = msg
+                _seed_status.color = Colors.SUCCESS
+            except Exception as e:
+                import logging
+                logging.exception("seed_for_user failed")
+                _seed_status.value = f"Lỗi: {e}"
+                _seed_status.color = Colors.ERROR
+            finally:
+                page.update()
+        _t.Thread(target=_run, daemon=True).start()
+
+    demo_btn = ft.Container(
+        content=ft.Column([
+            ft.Row([
+                ft.Text("🗂️", size=18),
+                ft.Text("Tạo dữ liệu Demo", size=Typography.H4,
+                        color=Colors.TEXT_PRIMARY, weight=Typography.BOLD, expand=True),
+            ], spacing=Spacing.SM),
+            ft.Text("Tạo 2 project, 12 task, work sessions để demo Dashboard & Insights",
+                    size=Typography.TINY, color=Colors.TEXT_MUTED),
+            ft.Container(height=Spacing.SM),
+            ft.Container(
+                content=ft.Row([
+                    ft.Icon(ft.Icons.ADD_CHART_ROUNDED, size=16, color="white"),
+                    ft.Text("Tạo Demo Data", size=Typography.SMALL,
+                            color="white", weight=Typography.SEMIBOLD),
+                ], spacing=6, alignment=ft.MainAxisAlignment.CENTER),
+                height=42, border_radius=Radius.MD,
+                bgcolor=Colors.PRIMARY,
+                alignment=ft.Alignment.CENTER,
+                on_click=_do_seed, ink=True,
+            ),
+            _seed_status,
+        ], spacing=4, tight=True),
+        padding=Spacing.MD, border_radius=Radius.LG,
+        bgcolor=Colors.BG_CARD,
+        border=ft.Border.all(1, Colors.PRIMARY_BORDER),
+        shadow=ft.BoxShadow(blur_radius=8, color=Colors.PRIMARY_SHADOW, offset=ft.Offset(0, 2)),
+    )
+
+    # ── Logout ────────────────────────────────────────────────
+    logout_btn = ft.Container(
+        content=ft.Row([
+            ft.Icon(ft.Icons.LOGOUT_ROUNDED, size=18, color=Colors.ERROR),
+            ft.Text("Đăng xuất", size=Typography.BODY,
+                    color=Colors.ERROR, weight=Typography.MEDIUM),
+        ], spacing=Spacing.SM, alignment=ft.MainAxisAlignment.CENTER),
+        height=44, border_radius=Radius.MD,
+        bgcolor=f"#10{Colors.ERROR[1:]}",
+        border=ft.Border.all(1, f"#30{Colors.ERROR[1:]}"),
+        alignment=ft.Alignment.CENTER,
+        on_click=lambda _: on_logout() if on_logout else None,
+        ink=True,
+    ) if on_logout else ft.Container(height=0)
+
     body = ft.Column([
         ft.Container(
             content=ft.Row([
@@ -131,6 +199,10 @@ def build_profile_screen(page: ft.Page, user, on_navigate, on_logout=None):
                 ft.Container(height=Spacing.MD),
                 ft.Text("Thành tựu", size=Typography.H4, color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
                 achievements,
+                ft.Container(height=Spacing.MD),
+                demo_btn,
+                ft.Container(height=Spacing.MD),
+                logout_btn,
                 ft.Container(height=Spacing.XXXL),
                 ft.Container(height=Spacing.XXXL),
             ], spacing=Spacing.SM),

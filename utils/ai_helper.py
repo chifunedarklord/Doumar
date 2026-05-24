@@ -44,27 +44,95 @@ _CACHE_TTL = 30             # seconds
 
 
 def _build_context(user_id: str) -> str:
-    """Xây dựng context có cấu trúc rõ ràng cho AI."""
+    """Build structured AI context with labeled sections from SQL Server tables."""
     from core.database import Storage
     from datetime import date as _date
+
+    today_str = _date.today().isoformat()
     all_users = Storage.get_users()
     user = next((u for u in all_users if u.id == user_id), None)
     tasks = TaskService.get_tasks(user_id)
-    today_str = _date.today().isoformat()
+    events = Storage.get_behavior_events(user_id, limit=100)
+    sessions = Storage.get_work_sessions(user_id, limit=30)
 
-    # ── Phân loại task ────────────────────────────────────────
-    active = [t for t in tasks if t.status not in ("done", "cancelled")]
-    overdue_tasks   = sorted([t for t in active if t.is_overdue],
-                             key=lambda t: t.due_date or "")
-    today_tasks     = [t for t in active if t.due_date == today_str and not t.is_overdue]
-    upcoming_tasks  = sorted(
+    sections = []
+
+    # ── [USER PROFILE] — từ bảng users + ai_memory ───────────────
+    profile_lines = ["[USER PROFILE]"]
+    if user:
+        full_name = getattr(user, "full_name", "") or getattr(user, "username", "")
+        if full_name:
+            profile_lines.append(f"Tên: {full_name}")
+        role_val = (AIMemoryService.recall_value(user_id, "preference", "role")
+                    or getattr(user, "role", ""))
+        if role_val:
+            profile_lines.append(f"Vai trò: {role_val}")
+        work_style = (AIMemoryService.recall_value(user_id, "preference", "work_style")
+                      or getattr(user, "work_style", "balanced"))
+        profile_lines.append(f"Phong cách làm việc: {work_style}")
+        wstart = getattr(user, "work_start", "08:00")
+        wend   = getattr(user, "work_end",   "18:00")
+        profile_lines.append(f"Giờ làm việc: {wstart}–{wend}")
+        sleep_t = getattr(user, "sleep_time", "23:00")
+        wake_t  = getattr(user, "wake_time",  "07:00")
+        profile_lines.append(f"Thói quen ngủ: ngủ {sleep_t}, dậy {wake_t}")
+        focus_dur = getattr(user, "preferred_work_duration", 50)
+        break_dur = getattr(user, "break_duration", 10)
+        profile_lines.append(f"Thời lượng focus tối ưu: {focus_dur} phút (nghỉ {break_dur} phút)")
+        main_goal = (AIMemoryService.recall_value(user_id, "goal", "main_goal")
+                     or AIMemoryService.recall_value(user_id, "preference", "main_goal"))
+        if main_goal:
+            profile_lines.append(f"Mục tiêu chính: {main_goal}")
+    else:
+        profile_lines.append("Chưa có thông tin hồ sơ")
+    sections.append("\n".join(profile_lines))
+
+    # ── [CURRENT STATE] — từ ai_memory (check-in) + user_behavior ─
+    state_lines = ["[CURRENT STATE]"]
+    peak_hours = BehaviorService.get_peak_hours(user_id)
+    productivity_score = BehaviorService.get_productivity_score(user_id)
+    peak_str = ", ".join(f"{h:02d}h" for h in peak_hours) if peak_hours else "chưa xác định"
+
+    live_energy = AIMemoryService.recall_value(user_id, "state", "estimated_energy")
+    live_stress = AIMemoryService.recall_value(user_id, "state", "estimated_stress")
+    live_mood   = AIMemoryService.recall_value(user_id, "state", "estimated_mood")
+
+    energy_val = int(live_energy) if live_energy is not None else (
+        getattr(user, "energy_level", 7) if user else 7)
+    stress_val = int(live_stress) if live_stress is not None else (
+        getattr(user, "stress_level", 5) if user else 5)
+    energy_src = "check-in" if live_energy is not None else "ước tính"
+    stress_src = "check-in" if live_stress is not None else "ước tính"
+
+    energy_bar = "▓" * energy_val + "░" * (10 - energy_val)
+    stress_bar = "▓" * stress_val  + "░" * (10 - stress_val)
+    state_lines.append(f"Năng lượng [{energy_bar}] {energy_val}/10 ({energy_src})")
+    state_lines.append(f"Stress      [{stress_bar}] {stress_val}/10 ({stress_src})")
+    if live_mood is not None:
+        mood_labels = {1: "rất tệ", 2: "tệ", 3: "bình thường", 4: "tốt", 5: "tuyệt vời"}
+        state_lines.append(f"Tâm trạng: {mood_labels.get(int(live_mood), str(live_mood))}")
+    state_lines.append(f"Năng suất tuần: {productivity_score:.0f}/100")
+    state_lines.append(f"Giờ vàng: {peak_str}")
+    # AI rule hints based on live state
+    if energy_val <= 3:
+        state_lines.append("⚠ NĂNG LƯỢNG THẤP → chỉ gợi ý task nhẹ, không push việc khó")
+    if stress_val >= 7:
+        state_lines.append("⚠ STRESS CAO → thêm nghỉ ngắn giữa các task, giảm áp lực")
+    sections.append("\n".join(state_lines))
+
+    # ── [TASK SUMMARY] — từ bảng tasks ───────────────────────────
+    active        = [t for t in tasks if t.status not in ("done", "cancelled")]
+    overdue_tasks = sorted([t for t in active if t.is_overdue],
+                           key=lambda t: t.due_date or "")
+    today_tasks   = [t for t in active if t.due_date == today_str and not t.is_overdue]
+    upcoming_tasks = sorted(
         [t for t in active if t.due_date and t.due_date > today_str],
         key=lambda t: (t.due_date, -t.ai_priority_score)
     )[:5]
-    no_date_tasks   = [t for t in active if not t.due_date][:3]
-    done_count      = sum(1 for t in tasks if t.status == "done")
-    total_count     = len(tasks)
-    completion_pct  = int(done_count / total_count * 100) if total_count else 0
+    no_date_tasks = [t for t in active if not t.due_date][:3]
+    done_count    = sum(1 for t in tasks if t.status == "done")
+    total_count   = len(tasks)
+    completion_pct = int(done_count / total_count * 100) if total_count else 0
 
     def _fmt_task(t) -> str:
         pri_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(t.priority, "⚪")
@@ -73,93 +141,112 @@ def _build_context(user_id: str) -> str:
         days = t.days_until_due
         deadline_str = ""
         if days is not None:
-            if days < 0:   deadline_str = f" · ⚠️ quá hạn {abs(days)}n"
+            if days < 0:    deadline_str = f" · ⚠️ quá hạn {abs(days)}n"
             elif days == 0: deadline_str = " · 🔔 hạn hôm nay"
             elif days == 1: deadline_str = " · hạn ngày mai"
             else:           deadline_str = f" · còn {days} ngày"
         score = getattr(t, "ai_priority_score", 50)
         est   = getattr(t, "estimated_minutes", 30)
-        return (f"  • {pri_icon} **{t.title}**{deadline_str}"
-                f" | {energy_icon} {est}p | score {score:.0f}")
+        return (f"  • {pri_icon} {t.title}{deadline_str} | {energy_icon} {est}p | score {score:.0f}")
 
-    sections = []
-
-    # Tổng quan
-    sections.append(
-        f"📊 TỔNG QUAN: {total_count} task · {done_count} xong ({completion_pct}%)"
+    task_lines = ["[TASK SUMMARY]"]
+    task_lines.append(
+        f"Tổng quan: {total_count} task · {done_count} xong ({completion_pct}%)"
         f" · {len(overdue_tasks)} quá hạn · {len(today_tasks)} hôm nay"
     )
-
-    # Quá hạn
     if overdue_tasks:
-        lines = [f"⚠️ QUÁ HẠN ({len(overdue_tasks)} task) — cần xử lý ngay:"]
-        lines += [_fmt_task(t) for t in overdue_tasks[:4]]
-        sections.append("\n".join(lines))
-
-    # Hôm nay
+        task_lines.append(f"\n⚠️ QUÁ HẠN ({len(overdue_tasks)} task) — cần xử lý ngay:")
+        task_lines += [_fmt_task(t) for t in overdue_tasks[:4]]
     if today_tasks:
-        lines = [f"📅 HÔM NAY ({len(today_tasks)} task):"]
-        lines += [_fmt_task(t) for t in sorted(today_tasks, key=lambda t: -t.ai_priority_score)[:4]]
-        sections.append("\n".join(lines))
-
-    # Sắp tới
+        task_lines.append(f"\n📅 HÔM NAY ({len(today_tasks)} task):")
+        task_lines += [_fmt_task(t) for t in sorted(
+            today_tasks, key=lambda t: -t.ai_priority_score)[:4]]
     if upcoming_tasks:
-        lines = ["📌 SẮP TỚI (top 5 theo độ ưu tiên):"]
-        lines += [_fmt_task(t) for t in upcoming_tasks]
-        sections.append("\n".join(lines))
-
-    # Không có deadline
+        task_lines.append("\n📌 SẮP TỚI (top 5 theo độ ưu tiên):")
+        task_lines += [_fmt_task(t) for t in upcoming_tasks]
     if no_date_tasks:
-        lines = ["📝 CHƯA ĐẶT DEADLINE:"]
-        lines += [f"  • {t.title}" for t in no_date_tasks]
-        sections.append("\n".join(lines))
+        task_lines.append("\n📝 CHƯA ĐẶT DEADLINE:")
+        task_lines += [f"  • {t.title}" for t in no_date_tasks]
+    sections.append("\n".join(task_lines))
 
-    # ── Trạng thái người dùng ─────────────────────────────────
-    peak_hours = BehaviorService.get_peak_hours(user_id)
-    productivity_score = BehaviorService.get_productivity_score(user_id)
-    peak_str = ", ".join(f"{h:02d}h" for h in peak_hours) if peak_hours else "chưa học được"
+    # ── [LEARNED HABITS] — từ user_behavior + work_sessions ──────
+    habits_lines = ["[LEARNED HABITS]"]
+    try:
+        from core.intelligence.behavior_learner import BehaviorLearner
 
-    state_lines = ["👤 TRẠNG THÁI USER:"]
-    state_lines.append(f"  • Năng suất tuần: **{productivity_score:.0f}/100** · Giờ vàng: {peak_str}")
+        if peak_hours:
+            hours_str = ", ".join(f"{h}:00" for h in sorted(peak_hours)[:4])
+            habits_lines.append(f"Giờ vàng (học được): {hours_str}")
 
-    if user:
-        live_energy = AIMemoryService.recall_value(user_id, "state", "estimated_energy")
-        live_stress = AIMemoryService.recall_value(user_id, "state", "estimated_stress")
-        live_mood   = AIMemoryService.recall_value(user_id, "state", "estimated_mood")
+        delay_patterns = BehaviorLearner.learn_delay_patterns(events)
+        if delay_patterns:
+            sorted_delays = sorted(delay_patterns.items(), key=lambda x: -x[1])
+            worst_cats = [c for c, v in sorted_delays[:2] if v > 0]
+            if worst_cats:
+                habits_lines.append(
+                    f"Category hay trì hoãn: {', '.join(worst_cats)} → AI sẽ tự chia nhỏ")
 
-        energy_val = int(live_energy) if live_energy is not None else getattr(user, "energy_level", 7)
-        stress_val = int(live_stress) if live_stress is not None else getattr(user, "stress_level", 5)
-        energy_src = "check-in" if live_energy is not None else "mặc định"
-        stress_src = "check-in" if live_stress is not None else "mặc định"
+        completed_sessions = [s for s in sessions
+                               if isinstance(s, dict) and s.get("duration_minutes", 0) > 0]
+        if completed_sessions:
+            avg_focus = sum(s.get("duration_minutes", 0)
+                            for s in completed_sessions) / len(completed_sessions)
+            avg_quality = sum(s.get("focus_quality", 5)
+                              for s in completed_sessions) / len(completed_sessions)
+            habits_lines.append(f"Focus trung bình: {avg_focus:.0f} phút/phiên, chất lượng {avg_quality:.1f}/10")
 
-        energy_bar = "▓" * energy_val + "░" * (10 - energy_val)
-        stress_bar = "▓" * stress_val  + "░" * (10 - stress_val)
-        state_lines.append(f"  • Năng lượng [{energy_bar}] **{energy_val}/10** ({energy_src})")
-        state_lines.append(f"  • Stress      [{stress_bar}] **{stress_val}/10** ({stress_src})")
-        if live_mood is not None:
-            mood_labels = {1: "rất tệ", 2: "tệ", 3: "bình thường", 4: "tốt", 5: "tuyệt vời"}
-            state_lines.append(f"  • Tâm trạng: **{mood_labels.get(int(live_mood), str(live_mood))}** ({int(live_mood)}/5)")
+        done_cats: dict = {}
+        for t in tasks:
+            if t.status == "done" and t.category:
+                done_cats[t.category] = done_cats.get(t.category, 0) + 1
+        if done_cats:
+            best_cat = max(done_cats.items(), key=lambda x: x[1])[0]
+            habits_lines.append(f"Category hoàn thành nhiều nhất: {best_cat}")
+    except Exception:
+        pass
+    if len(habits_lines) == 1:
+        habits_lines.append("Chưa đủ dữ liệu (cần thêm hoạt động để học thói quen)")
+    sections.append("\n".join(habits_lines))
 
-        sleep  = getattr(user, "sleep_time", "23:00")
-        wake   = getattr(user, "wake_time", "07:00")
-        wstart = getattr(user, "work_start", "08:00")
-        wend   = getattr(user, "work_end", "18:00")
-        state_lines.append(f"  • Giờ làm: {wstart}–{wend} · Ngủ: {sleep}–{wake}")
+    # ── [RECENT BEHAVIOR] — từ user_behavior ─────────────────────
+    recent_lines = ["[RECENT BEHAVIOR]"]
+    _ev_labels = {
+        "task_complete":   "✅ Hoàn thành task",
+        "task_delay":      "⏰ Trì hoãn task",
+        "session_start":   "🎯 Bắt đầu focus",
+        "session_end":     "⏹ Kết thúc focus",
+        "chat_sent":       "💬 Gửi tin nhắn AI",
+        "plan_save_tasks": "📋 Lưu task từ kế hoạch",
+        "plan_refine":     "🔧 Tinh chỉnh kế hoạch",
+        "task_create":     "➕ Tạo task mới",
+    }
+    if events:
+        for ev in events[:8]:
+            ev_type = ev.get("event_type", "")
+            ts_str  = (ev.get("timestamp", "") or "")[:16]
+            ev_data = ev.get("event_data", {}) or {}
+            label   = _ev_labels.get(ev_type, f"· {ev_type}")
+            if ev_type == "task_complete":
+                title = ev_data.get("title", ev_data.get("task_id", "")[:12])
+                if title:
+                    label += f": {title}"
+            elif ev_type == "session_end":
+                dur  = ev_data.get("duration_minutes", 0)
+                qual = ev_data.get("focus_quality", 5)
+                label += f" ({dur} phút, chất lượng {qual}/10)"
+            elif ev_type == "plan_refine":
+                opt = ev_data.get("option", "")
+                if opt:
+                    label += f": {opt}"
+            recent_lines.append(f"  {ts_str}  {label}" if ts_str else f"  {label}")
+    else:
+        recent_lines.append("  Chưa có hoạt động nào được ghi lại")
+    sections.append("\n".join(recent_lines))
 
-        extras = []
-        for key, label in [("role", "Vai trò"), ("main_goal", "Mục tiêu"), ("work_style", "Phong cách")]:
-            val = AIMemoryService.recall_value(user_id, "preference", key)
-            if val:
-                extras.append(f"{label}: {val}")
-        if extras:
-            state_lines.append("  • " + " · ".join(extras))
-
-    sections.append("\n".join(state_lines))
-
-    # AI Memory summary
+    # ── [AI MEMORY] — từ bảng ai_memory ──────────────────────────
     memory_text = AIMemoryService.get_context_summary(user_id)
-    if memory_text:
-        sections.append(memory_text)
+    sections.append(f"[AI MEMORY]\n{memory_text}" if memory_text
+                    else "[AI MEMORY]\nChưa có bộ nhớ AI nào được lưu")
 
     return "\n\n".join(sections)
 
@@ -191,16 +278,16 @@ def _get_system_prompt(context: str) -> str:
         else "Chào buổi tối" if 18 <= hour < 22
         else "Đêm khuya rồi"
     )
-    return f"""Bạn là **Doumar** — trợ lý năng suất AI của TaskFlow.
+    return f"""Bạn là **Doumar** — trợ lý năng suất AI cá nhân của TaskFlow.
 Thời gian hiện tại: {now.strftime('%H:%M, %A %d/%m/%Y')} ({greeting})
 
-━━━ DỮ LIỆU NGƯỜI DÙNG ━━━
+━━━ DỮ LIỆU NGƯỜI DÙNG (từ SQL Server) ━━━
 {context}
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ## DANH TÍNH & PHONG CÁCH
 
-Bạn là Doumar — một người bạn đồng hành thông minh, thực tế, không vòng vo.
+Bạn là Doumar — trợ lý cá nhân thông minh, thực tế, không vòng vo.
 Giọng điệu: chuyên nghiệp nhưng gần gũi, thẳng thắn, đôi khi hài hước nhẹ.
 Ngôn ngữ: Tiếng Việt tự nhiên — không cứng nhắc, không robot.
 
@@ -228,6 +315,17 @@ Ngôn ngữ: Tiếng Việt tự nhiên — không cứng nhắc, không robot.
 - ⚡ cần năng lượng cao  |  💤 nhẹ nhàng  |  🎯 focus
 - ✅ đã xong  |  ⚠️ cảnh báo  |  💡 gợi ý
 
+## CÁ NHÂN HÓA — BẮT BUỘC SỬ DỤNG DỮ LIỆU
+
+Luôn đọc [CURRENT STATE] và [LEARNED HABITS] trong dữ liệu người dùng và áp dụng:
+
+- **Năng lượng ≤ 3/10** → chỉ gợi ý task nhẹ (💤 low energy), tuyệt đối không push task khó
+- **Stress ≥ 7/10** → thêm gợi ý nghỉ ngơi 5–10 phút, giảm áp lực, không tạo danh sách dài
+- **Task cần energy cao (⚡⚡)** → xếp vào giờ vàng của người dùng
+- **Category hay trì hoãn** → tự động đề xuất chia nhỏ thành bước ≤30 phút
+- **Khi gợi ý hoặc lên kế hoạch** → giải thích ngắn 1 câu tại sao (vd: "vì đây là giờ vàng của bạn")
+- **Đêm khuya (01:00–04:00)** → khuyên nghỉ ngơi ngay, không gợi ý làm thêm việc
+
 ## LOGIC ƯU TIÊN
 
 Khi gợi ý task, áp dụng theo thứ tự:
@@ -239,16 +337,7 @@ Khi gợi ý task, áp dụng theo thứ tự:
 ## CÁC TÌNH HUỐNG ĐẶC BIỆT
 
 **Khi user hỏi "làm gì bây giờ":**
-→ Nêu đúng 2-3 task ưu tiên nhất. Không giải thích lý do trừ khi được hỏi.
-
-**Khi năng lượng user ≤ 3/10:**
-→ Chỉ gợi ý task nhẹ (💤) hoặc quick wins. Không push task khó.
-
-**Khi stress ≥ 7/10:**
-→ Thêm 1 gợi ý nghỉ ngơi/break. Không tạo áp lực thêm.
-
-**Khi đêm khuya (01:00–04:00):**
-→ Khuyên đi ngủ ngay. Tuyệt đối không gợi ý làm thêm việc.
+→ Nêu đúng 2-3 task ưu tiên nhất. Nếu năng lượng thấp, chỉ task nhẹ.
 
 **Khi user hỏi phân tích / báo cáo:**
 → Có thể dùng thêm headers (##) và bảng nếu cần. Tối đa 200 từ.
@@ -256,13 +345,35 @@ Khi gợi ý task, áp dụng theo thứ tự:
 **Khi user hỏi câu đơn giản:**
 → Trả lời 1-2 câu. Không thêm bullet points nếu không cần thiết.
 
+## LÊN KẾ HOẠCH — QUY TẮC BẮT BUỘC
+
+Khi user yêu cầu lên kế hoạch:
+
+**LUÔN tạo kế hoạch nháp ngay** dựa trên thông tin hiện có — không hỏi trước rồi mới làm.
+Nếu thiếu thông tin (địa điểm, ngân sách, v.v.) → ghi rõ vào phần "Giả định".
+Kế hoạch phải cá nhân hóa: xếp task khó vào giờ vàng, task nhẹ lúc năng lượng thấp.
+Sau kế hoạch → hỏi ĐÚNG 1 câu ngắn để tinh chỉnh (không hỏi nhiều câu hỏi).
+Cuối kế hoạch giải thích ngắn: "Đã dựa trên [giờ vàng/năng lượng/thói quen] của bạn".
+
+Format kế hoạch chuẩn:
+```
+🗓️ [Tiêu đề kế hoạch]
+💡 Giả định: [liệt kê nếu thiếu thông tin]
+
+[Giờ/Bước] — [Hoạt động cụ thể]
+...
+
+📌 Dựa trên: [thói quen/dữ liệu đã dùng]
+```
+
 ## CẤM TUYỆT ĐỐI
 
 ✗ Không mở đầu bằng "Xin chào!", "Chắc chắn rồi!", "Tuyệt vời!" hay các cụm sáo rỗng
 ✗ Không nhắc lại toàn bộ danh sách task — chỉ nêu những gì liên quan
 ✗ Không giải thích điều user đã biết
 ✗ Không kết thúc bằng "Hãy cho tôi biết nếu bạn cần thêm gì!"
-✗ Không dùng tiếng Anh trừ tên riêng hoặc thuật ngữ kỹ thuật"""
+✗ Không dùng tiếng Anh trừ tên riêng hoặc thuật ngữ kỹ thuật
+✗ Không chỉ hỏi lại câu hỏi rồi dừng — phải tạo kế hoạch nháp trước dù thiếu thông tin"""
 
 
 def _is_retryable(err_str: str) -> bool:
@@ -289,6 +400,238 @@ def _call_gemini(client, model: str, contents, sys_prompt: str):
         contents=contents,
         config=config,
     )
+
+
+def parse_natural_task(text: str, user_id: str) -> dict:
+    """Parse natural language (Vietnamese) into task JSON fields.
+    Returns dict with keys: title, description, category, priority,
+    due_date, due_time, estimated_minutes, reminder_minutes.
+    Falls back to basic heuristics if API unavailable."""
+    from datetime import date, timedelta
+    import re, json as _json
+
+    today = date.today()
+
+    def _fallback() -> dict:
+        lower = text.lower()
+        # due_date heuristics
+        due_date = None
+        due_time = None
+        if "hôm nay" in lower:
+            due_date = today.isoformat()
+        elif "ngày mai" in lower or "mai" in lower:
+            due_date = (today + timedelta(days=1)).isoformat()
+        elif "tuần sau" in lower:
+            due_date = (today + timedelta(days=7)).isoformat()
+        # time heuristic  e.g. "8h", "14h30", "8:30"
+        m = re.search(r"(\d{1,2})[h:](\d{0,2})", lower)
+        if m:
+            h = int(m.group(1))
+            mi = int(m.group(2)) if m.group(2) else 0
+            if 0 <= h <= 23:
+                due_time = f"{h:02d}:{mi:02d}"
+        # priority heuristics
+        priority = "medium"
+        if any(w in lower for w in ("gấp", "khẩn", "urgent", "ngay", "quan trọng")):
+            priority = "high"
+        elif any(w in lower for w in ("thư giãn", "rảnh", "thoải mái")):
+            priority = "low"
+        # category heuristics
+        category = "personal"
+        if any(w in lower for w in ("họp", "báo cáo", "công ty", "sếp", "khách", "dự án")):
+            category = "work"
+        elif any(w in lower for w in ("tập", "gym", "chạy", "sức khỏe", "ăn", "ngủ")):
+            category = "health"
+        elif any(w in lower for w in ("tiền", "lương", "chi tiêu", "mua", "thanh toán")):
+            category = "finance"
+        # reminder
+        reminder = 15 if due_time else 0
+        return {
+            "title": text[:80],
+            "description": "",
+            "category": category,
+            "priority": priority,
+            "due_date": due_date,
+            "due_time": due_time,
+            "estimated_minutes": 30,
+            "reminder_minutes": reminder,
+        }
+
+    if not _API_KEY:
+        return _fallback()
+
+    try:
+        client = genai.Client(api_key=_API_KEY)
+        prompt = f"""Hôm nay là {today.isoformat()} ({today.strftime('%A')}).
+Người dùng nhập: "{text}"
+
+Phân tích và trả về JSON (chỉ JSON, không markdown, không giải thích):
+{{
+  "title": "tiêu đề ngắn gọn",
+  "description": "mô tả nếu cần, để trống nếu không có",
+  "category": "work|personal|health|finance|education",
+  "priority": "high|medium|low",
+  "due_date": "YYYY-MM-DD hoặc null",
+  "due_time": "HH:MM hoặc null",
+  "estimated_minutes": 30,
+  "reminder_minutes": 15
+}}
+
+Quy tắc:
+- "mai", "ngày mai" → due_date là {(today + timedelta(days=1)).isoformat()}
+- "hôm nay" → due_date là {today.isoformat()}
+- "tuần sau" → {(today + timedelta(days=7)).isoformat()}
+- "8h", "14h30" → due_time là "08:00", "14:30"
+- Nếu có due_time → reminder_minutes = 15, không thì 0
+- Chọn category phù hợp nhất với nội dung"""
+
+        resp = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
+            config=types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_budget=0)),
+        )
+        raw = resp.text.strip()
+        # Strip markdown code fences if present
+        raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
+        data = _json.loads(raw)
+        # Ensure required keys exist
+        return {
+            "title": data.get("title", text[:80]),
+            "description": data.get("description", ""),
+            "category": data.get("category", "personal"),
+            "priority": data.get("priority", "medium"),
+            "due_date": data.get("due_date"),
+            "due_time": data.get("due_time"),
+            "estimated_minutes": int(data.get("estimated_minutes") or 30),
+            "reminder_minutes": int(data.get("reminder_minutes") or 0),
+        }
+    except Exception:
+        return _fallback()
+
+
+def extract_task_from_reply(reply_text: str, user_id: str) -> dict | None:
+    """Check if an AI reply contains a clear task suggestion.
+    Returns task dict if found, None otherwise."""
+    import re, json as _json
+    from datetime import date, timedelta
+    today = date.today()
+
+    # Quick disqualify: too short or no task-like keywords
+    lower = reply_text.lower()
+    task_signals = ("tạo task", "thêm task", "tạo công việc", "đề xuất task",
+                    "task:", "công việc:", "nhắc nhở", "nên làm", "gợi ý task")
+    if not any(sig in lower for sig in task_signals):
+        return None
+
+    if not _API_KEY:
+        return None
+
+    try:
+        client = genai.Client(api_key=_API_KEY)
+        prompt = f"""Từ câu trả lời AI dưới đây, kiểm tra xem có ĐỀ XUẤT TẠO TASK cụ thể không.
+Nếu có, trả về JSON. Nếu không, trả về {{"found": false}}.
+
+Câu trả lời AI:
+"{reply_text[:500]}"
+
+Hôm nay: {today.isoformat()}
+
+JSON nếu có task:
+{{
+  "found": true,
+  "title": "tiêu đề task",
+  "description": "",
+  "category": "work|personal|health|finance|education",
+  "priority": "high|medium|low",
+  "due_date": "YYYY-MM-DD hoặc null",
+  "due_time": "HH:MM hoặc null",
+  "estimated_minutes": 30,
+  "reminder_minutes": 0
+}}"""
+        resp = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
+            config=types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_budget=0)),
+        )
+        raw = resp.text.strip()
+        raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
+        data = _json.loads(raw)
+        if not data.get("found"):
+            return None
+        return {
+            "title": data.get("title", "Task mới"),
+            "description": data.get("description", ""),
+            "category": data.get("category", "personal"),
+            "priority": data.get("priority", "medium"),
+            "due_date": data.get("due_date"),
+            "due_time": data.get("due_time"),
+            "estimated_minutes": int(data.get("estimated_minutes") or 30),
+            "reminder_minutes": int(data.get("reminder_minutes") or 0),
+        }
+    except Exception:
+        return None
+
+
+def parse_ocr_to_task(ocr_text: str) -> dict:
+    """Parse OCR-extracted text into task fields using AI."""
+    import re, json as _json
+    from datetime import date, timedelta
+    today = date.today()
+
+    def _fallback():
+        lines = [l.strip() for l in ocr_text.split("\n") if l.strip()]
+        return {
+            "title": lines[0][:80] if lines else "Task từ ảnh",
+            "description": "\n".join(lines[1:])[:300] if len(lines) > 1 else "",
+            "category": "personal",
+            "priority": "medium",
+            "due_date": None,
+            "due_time": None,
+            "estimated_minutes": 30,
+            "reminder_minutes": 0,
+        }
+
+    if not _API_KEY or not ocr_text.strip():
+        return _fallback()
+
+    try:
+        client = genai.Client(api_key=_API_KEY)
+        prompt = f"""Hôm nay: {today.isoformat()}.
+Đây là văn bản trích xuất từ ảnh bằng OCR:
+
+\"\"\"{ocr_text[:1000]}\"\"\"
+
+Phân tích và tạo task từ nội dung trên. Trả về JSON (chỉ JSON):
+{{
+  "title": "tiêu đề task ngắn gọn",
+  "description": "mô tả chi tiết nếu có",
+  "category": "work|personal|health|finance|education",
+  "priority": "high|medium|low",
+  "due_date": "YYYY-MM-DD hoặc null",
+  "due_time": "HH:MM hoặc null",
+  "estimated_minutes": 30,
+  "reminder_minutes": 0
+}}"""
+        resp = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
+            config=types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_budget=0)),
+        )
+        raw = resp.text.strip()
+        raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
+        data = _json.loads(raw)
+        return {
+            "title": data.get("title", "Task từ ảnh")[:80],
+            "description": data.get("description", ""),
+            "category": data.get("category", "personal"),
+            "priority": data.get("priority", "medium"),
+            "due_date": data.get("due_date"),
+            "due_time": data.get("due_time"),
+            "estimated_minutes": int(data.get("estimated_minutes") or 30),
+            "reminder_minutes": int(data.get("reminder_minutes") or 0),
+        }
+    except Exception:
+        return _fallback()
 
 
 def get_ai_reply(settings: dict, message: str, user_id: str,
@@ -381,3 +724,64 @@ def get_gemini_reply(message: str, user_id: str, session_id: str,
                 "Đây là lỗi tạm thời từ phía Google. Vui lòng thử lại sau 1-2 phút."
             )
         return f"⚠️ Lỗi Gemini API: {err}"
+
+
+def extract_memory_from_user_message(user_id: str, message: str) -> None:
+    """Dùng Gemini trích xuất thói quen/sở thích/mục tiêu từ tin nhắn user và lưu vào ai_memory.
+    Chạy trong background thread — không block UI."""
+    if not _API_KEY or len(message.strip()) < 15:
+        return
+    try:
+        import json as _json
+        import re as _re
+
+        client = genai.Client(api_key=_API_KEY)
+        prompt = f"""Phân tích tin nhắn người dùng và trích xuất thói quen/sở thích/mục tiêu/trạng thái nếu có.
+
+Tin nhắn: "{message[:500]}"
+
+Chỉ trích xuất khi thông tin RÕ RÀNG và ĐÁNG LƯU lâu dài.
+KHÔNG trích xuất: tên riêng, email, mật khẩu, câu hỏi đơn giản, yêu cầu một lần, thông tin nhạy cảm.
+
+Trả về JSON thuần túy (không markdown):
+{{
+  "should_save": true/false,
+  "memories": [
+    {{
+      "memory_type": "preference|habit|pattern|goal|state|constraint",
+      "key": "key_ngan_gon",
+      "value": "gia tri cu the",
+      "confidence": 0.0-1.0
+    }}
+  ]
+}}
+
+Ví dụ trích xuất hợp lệ:
+- "Tôi thường học tốt nhất buổi tối" → habit: peak_study_time="buổi tối", confidence=0.8
+- "Tôi muốn hoàn thành đồ án trước 30/6" → goal: main_goal="hoàn thành đồ án trước 30/6", confidence=0.9
+- "Tôi hay bị mất tập trung khi làm nhóm" → preference: work_style="solo hiệu quả hơn", confidence=0.75
+- "Tôi đang stress vì thi cử" → state: stress_cause="thi cử", confidence=0.85
+- "Tôi không thích task hành chính" → preference: dislike_category="administrative", confidence=0.7"""
+
+        resp = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
+            config=types.GenerateContentConfig(
+                thinking_config=types.ThinkingConfig(thinking_budget=0)
+            ),
+        )
+        raw = resp.text.strip()
+        raw = _re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
+        data = _json.loads(raw)
+
+        if data.get("should_save") and data.get("memories"):
+            for mem in data["memories"]:
+                mem_type   = mem.get("memory_type", "preference")
+                key        = str(mem.get("key", "")).strip()
+                value      = str(mem.get("value", "")).strip()
+                confidence = float(mem.get("confidence", 0.6))
+                if key and value and confidence >= 0.5:
+                    AIMemoryService.remember(user_id, mem_type, key, value, confidence)
+                    invalidate_context_cache(user_id)
+    except Exception:
+        pass  # non-critical — silently ignore

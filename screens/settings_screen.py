@@ -63,7 +63,7 @@ def build_settings_screen(page: ft.Page, user, on_navigate, on_logout):
             avatar_placeholder.content = avatar_circle(
                 tf_name.value.strip() or user.full_name or user.username, color, 80)
             for gc in color_pickers:
-                gc.content.border = ft.border.all(
+                gc.content.border = ft.Border.all(
                     2, Colors.PRIMARY if gc.content.content.bgcolor == color else "transparent"
                 )
             page.update()

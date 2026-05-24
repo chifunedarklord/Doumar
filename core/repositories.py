@@ -114,11 +114,13 @@ class Storage:
             return [cls._orm_to_task(m) for m in models]
 
     @classmethod
-    def save_task(cls, task: Task):
+    def save_task(cls, task: Task) -> bool:
+        """Save task (upsert). Returns True if this was a new task, False if update."""
         task.updated_at = datetime.now().isoformat()
         with SessionLocal() as db:
             m = db.query(TaskModel).filter(TaskModel.id == task.id).first()
-            if not m:
+            is_new = m is None
+            if is_new:
                 m = TaskModel(id=task.id)
                 db.add(m)
             
@@ -158,6 +160,7 @@ class Storage:
             m.deadline_type = getattr(task, "deadline_type", "soft")
             m.project_id = getattr(task, "project_id", None)
             db.commit()
+        return is_new
 
     @classmethod
     def delete_task(cls, task_id: str):

@@ -179,7 +179,7 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
             padding=ft.padding.symmetric(horizontal=12, vertical=10),
             border_radius=Radius.MD,
             bgcolor=Colors.BG_CARD,
-            border=ft.border.all(1, Colors.BORDER),
+            border=ft.Border.all(1, Colors.BORDER),
             on_click=lambda _: setattr(picker, 'open', True) or page.update(),
             expand=True,
             ink=True,
@@ -209,7 +209,7 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
                     sel = (i == idx)
                     info_i = options[keys_list[i]]
                     c.bgcolor = Colors.PRIMARY if sel else "transparent"
-                    c.border = ft.border.all(1.5 if sel else 1, Colors.PRIMARY if sel else Colors.BORDER)
+                    c.border = ft.Border.all(1.5 if sel else 1, Colors.PRIMARY if sel else Colors.BORDER)
                     c.content.controls[0].color = info_i.get("color", Colors.TEXT_MUTED) if sel else Colors.TEXT_MUTED
                     c.content.controls[1].color = Colors.TEXT_ON_PRIMARY if sel else Colors.TEXT_MUTED
                 page.update()
@@ -225,7 +225,7 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
                 padding=ft.padding.symmetric(horizontal=10, vertical=6),
                 border_radius=Radius.FULL,
                 bgcolor=Colors.PRIMARY if sel else "transparent",
-                border=ft.border.all(1.5 if sel else 1, Colors.PRIMARY if sel else Colors.BORDER),
+                border=ft.Border.all(1.5 if sel else 1, Colors.PRIMARY if sel else Colors.BORDER),
                 on_click=make_click(key, idx),
                 animate=ft.Animation(120, ft.AnimationCurve.EASE_OUT),
             )
@@ -244,7 +244,7 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
                 for i, c in enumerate(chips):
                     sel = (i == idx)
                     c.bgcolor = Colors.PRIMARY if sel else "transparent"
-                    c.border = ft.border.all(1.5 if sel else 1, Colors.PRIMARY if sel else Colors.BORDER)
+                    c.border = ft.Border.all(1.5 if sel else 1, Colors.PRIMARY if sel else Colors.BORDER)
                     c.content.color = Colors.TEXT_ON_PRIMARY if sel else Colors.TEXT_MUTED
                 page.update()
             return _click
@@ -256,7 +256,7 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
                 padding=ft.padding.symmetric(horizontal=10, vertical=6),
                 border_radius=Radius.FULL,
                 bgcolor=Colors.PRIMARY if sel else "transparent",
-                border=ft.border.all(1.5 if sel else 1, Colors.PRIMARY if sel else Colors.BORDER),
+                border=ft.Border.all(1.5 if sel else 1, Colors.PRIMARY if sel else Colors.BORDER),
                 on_click=make_click(val, idx),
                 animate=ft.Animation(120, ft.AnimationCurve.EASE_OUT),
             )
@@ -318,8 +318,133 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
     )
 
     # ── File Picker for OCR ──────────────────────────────
+    def _apply_ocr_data(data: dict):
+        """Apply AI-parsed OCR fields to the form (fill title, desc, etc.)."""
+        if data.get("title") and not tf_title.value.strip():
+            tf_title.value = data["title"]
+        if data.get("description"):
+            tf_desc.value = data["description"]
+        if data.get("due_date"):
+            due_val["v"] = data["due_date"]
+            due_label.value = data["due_date"]
+            due_label.color = Colors.TEXT_PRIMARY
+        if data.get("due_time"):
+            time_val["v"] = data["due_time"]
+            time_label.value = data["due_time"]
+            time_label.color = Colors.TEXT_PRIMARY
+        if data.get("category") in ("work", "personal", "health", "finance", "education"):
+            cat_sel["v"] = data["category"]
+        if data.get("priority") in ("high", "medium", "low"):
+            pri_sel["v"] = data["priority"]
+        page.update()
+        snack(page, "✓ AI đã điền thông tin từ ảnh — kiểm tra và chỉnh sửa nếu cần")
+
+    def _show_ocr_confirm(ocr_text: str, data: dict):
+        """Show OCR result + AI-parsed fields for user to confirm."""
+        tf_raw = ft.TextField(
+            value=ocr_text[:500],
+            label="Văn bản nhận dạng được",
+            multiline=True, min_lines=3, max_lines=5,
+            bgcolor=Colors.BG_SURFACE, border_color=Colors.BORDER,
+            focused_border_color=Colors.PRIMARY,
+            text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY, size=Typography.TINY),
+            label_style=ft.TextStyle(color=Colors.TEXT_MUTED, size=Typography.TINY),
+            border_radius=Radius.MD, cursor_color=Colors.PRIMARY,
+            content_padding=ft.padding.symmetric(horizontal=12, vertical=8),
+            read_only=True,
+        )
+        info_rows = []
+        if data.get("title"):
+            info_rows.append(ft.Row([
+                ft.Text("Tiêu đề:", size=Typography.TINY, color=Colors.TEXT_MUTED, width=70),
+                ft.Text(data["title"][:50], size=Typography.TINY, color=Colors.TEXT_PRIMARY,
+                        expand=True),
+            ]))
+        if data.get("due_date"):
+            info_rows.append(ft.Row([
+                ft.Text("Hạn:", size=Typography.TINY, color=Colors.TEXT_MUTED, width=70),
+                ft.Text(f'{data["due_date"]} {data.get("due_time","") or ""}',
+                        size=Typography.TINY, color=Colors.TEXT_PRIMARY),
+            ]))
+        parsed_preview = ft.Column(info_rows, spacing=4, tight=True) if info_rows else ft.Container()
+
+        def _confirm(_):
+            bs[0].open = False
+            page.update()
+            _apply_ocr_data(data)
+
+        def _cancel(_):
+            bs[0].open = False
+            page.update()
+
+        sheet = ft.Column([
+            ft.Container(
+                content=ft.Container(width=40, height=4, border_radius=Radius.FULL,
+                                     bgcolor="#444444"),
+                alignment=ft.Alignment.CENTER,
+                padding=ft.padding.only(top=12, bottom=8),
+            ),
+            ft.Container(
+                content=ft.Column([
+                    ft.Row([
+                        ft.Icon(ft.Icons.DOCUMENT_SCANNER_OUTLINED, size=18,
+                                color=Colors.PRIMARY),
+                        ft.Text("Kết quả OCR + AI", size=Typography.H3,
+                                color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
+                    ], spacing=Spacing.SM),
+                    ft.Text("AI đã phân tích ảnh. Xác nhận để điền vào form.",
+                            size=Typography.TINY, color=Colors.TEXT_MUTED),
+                    ft.Container(height=Spacing.SM),
+                    tf_raw,
+                    ft.Container(height=Spacing.SM),
+                    parsed_preview,
+                    ft.Container(height=Spacing.MD),
+                    ft.Row([
+                        ft.Container(
+                            content=ft.Text("Bỏ qua", size=Typography.BODY,
+                                            color=Colors.TEXT_MUTED),
+                            height=44, expand=True, border_radius=Radius.MD,
+                            bgcolor=Colors.BG_SURFACE,
+                            border=ft.Border.all(1, Colors.BORDER),
+                            alignment=ft.Alignment.CENTER,
+                            on_click=_cancel, ink=True,
+                        ),
+                        ft.Container(width=8),
+                        ft.Container(
+                            content=ft.Row([
+                                ft.Icon(ft.Icons.CHECK_ROUNDED, size=16, color="white"),
+                                ft.Text("Điền vào form", size=Typography.BODY,
+                                        color="white", weight=Typography.SEMIBOLD),
+                            ], alignment=ft.MainAxisAlignment.CENTER, spacing=4),
+                            height=44, expand=True, border_radius=Radius.MD,
+                            bgcolor=Colors.PRIMARY,
+                            alignment=ft.Alignment.CENTER,
+                            on_click=_confirm, ink=True,
+                        ),
+                    ]),
+                    ft.Container(height=Spacing.XL),
+                ], spacing=0, tight=True),
+                padding=ft.padding.symmetric(horizontal=Spacing.LG),
+            ),
+        ], spacing=0, tight=True)
+
+        cbs = ft.BottomSheet(
+            content=ft.Container(
+                content=sheet,
+                bgcolor=Colors.BG_CARD,
+                border_radius=ft.BorderRadius.only(top_left=Radius.XL, top_right=Radius.XL),
+                padding=0,
+                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+            ),
+            open=True, draggable=True, use_safe_area=True,
+        )
+        bs = [cbs]
+        page.overlay.append(cbs)
+        page.update()
+
     def process_ocr_click(_e):
         def _run():
+            import logging
             try:
                 import tkinter as tk
                 from tkinter import filedialog
@@ -327,52 +452,53 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
                 root.attributes('-topmost', True)
                 root.withdraw()
                 file_path = filedialog.askopenfilename(
-                    title="Chọn ảnh", 
+                    title="Chọn ảnh",
                     filetypes=[("Image files", "*.jpg;*.jpeg;*.png;*.bmp")]
                 )
                 root.destroy()
             except Exception:
                 file_path = None
 
-            if not file_path: return
-            
-            # Using run_task equivalent locally to update ui thread safely
-            def notify_progress():
-                snack(page, "Đang xử lý ảnh (OCR)...")
-                page.update()
+            if not file_path:
+                return
+
             try:
-                page.run_task(lambda: notify_progress())
+                page.run_task(lambda: snack(page, "Đang xử lý ảnh (OCR + AI)…"))
             except Exception:
                 pass
-            
+
             try:
                 import pytesseract
                 from PIL import Image
-                text = pytesseract.image_to_string(Image.open(file_path), lang="eng+vie")
-                
-                def _update_ui():
-                    if text.strip():
-                        if not tf_title.value:
-                            lines = [l for l in text.split('\n') if l.strip()]
-                            tf_title.value = lines[0] if lines else ""
-                            tf_desc.value = '\n'.join(lines[1:]) if len(lines) > 1 else text
-                        else:
-                            tf_desc.value = (tf_desc.value + "\n\n" + text).strip()
-                        snack(page, "Trích xuất văn bản thành công!")
-                    else:
-                        snack(page, "Không tìm thấy chữ trong ảnh")
-                    page.update()
-                
-                try:    
-                    page.run_task(lambda: _update_ui())
-                except Exception:
-                    pass
+                ocr_text = pytesseract.image_to_string(Image.open(file_path), lang="eng+vie")
             except Exception as ex:
-                print("OCR Error:", ex)
+                logging.exception("OCR failed")
                 try:
-                    page.run_task(lambda: snack(page, "Lỗi nhận dạng ảnh. Tesseract-OCR có đang được cài đặt không?"))
+                    page.run_task(lambda: snack(page,
+                        "Lỗi OCR. Kiểm tra Tesseract-OCR đã được cài đặt chưa?"))
                 except Exception:
                     pass
+                return
+
+            if not ocr_text.strip():
+                try:
+                    page.run_task(lambda: snack(page, "Không tìm thấy chữ trong ảnh"))
+                except Exception:
+                    pass
+                return
+
+            # Pipe OCR text through AI
+            try:
+                from utils.ai_helper import parse_ocr_to_task
+                data = parse_ocr_to_task(ocr_text)
+            except Exception:
+                logging.exception("parse_ocr_to_task failed")
+                data = {"title": "", "description": ocr_text[:300]}
+
+            try:
+                page.run_task(lambda: _show_ocr_confirm(ocr_text, data))
+            except Exception:
+                pass
 
         threading.Thread(target=_run, daemon=True).start()
 
@@ -469,7 +595,7 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
             ft.Container(height=Spacing.SM),
             
             ft.Row([
-                ft.Container(content=ft.Text("Hủy", size=Typography.BODY, color=Colors.TEXT_MUTED, weight=Typography.MEDIUM), height=48, expand=1, border_radius=Radius.MD, bgcolor=Colors.BG_SURFACE, border=ft.border.all(1, Colors.BORDER), alignment=ft.Alignment.CENTER, on_click=cancel_task, ink=True),
+                ft.Container(content=ft.Text("Hủy", size=Typography.BODY, color=Colors.TEXT_MUTED, weight=Typography.MEDIUM), height=48, expand=1, border_radius=Radius.MD, bgcolor=Colors.BG_SURFACE, border=ft.Border.all(1, Colors.BORDER), alignment=ft.Alignment.CENTER, on_click=cancel_task, ink=True),
                 ft.Container(width=Spacing.SM),
                 ft.Container(content=ft.Row([ft.Icon(ft.Icons.CHECK_ROUNDED, size=16, color=Colors.TEXT_ON_PRIMARY), ft.Container(width=4), ft.Text("Lưu", size=Typography.BODY, color=Colors.TEXT_ON_PRIMARY, weight=Typography.SEMIBOLD)], alignment=ft.MainAxisAlignment.CENTER, spacing=0), height=48, expand=2, border_radius=Radius.MD, bgcolor=Colors.PRIMARY, alignment=ft.Alignment.CENTER, on_click=save_task, ink=True),
             ]),

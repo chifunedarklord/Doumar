@@ -23,25 +23,21 @@ def build_auth_screen(page: ft.Page, on_login_success):
 
     # ── INPUTS ────────────────────────────
     tf_username = text_input("Tên đăng nhập", "Nhập username...",
-                            prefix_icon=ft.Icons.PERSON_OUTLINE, value="admin")
+                            prefix_icon=ft.Icons.PERSON_OUTLINE)
 
     tf_email = text_input("Email", "Nhập email...",
-                         prefix_icon=ft.Icons.EMAIL_OUTLINED,
-                         value="admin@taskflow.com")
+                         prefix_icon=ft.Icons.EMAIL_OUTLINED)
 
     tf_fullname = text_input("Họ và tên", "Nhập họ tên...",
-                            prefix_icon=ft.Icons.BADGE_OUTLINED,
-                            value="Admin Test")
+                            prefix_icon=ft.Icons.BADGE_OUTLINED)
 
     tf_password = text_input("Mật khẩu", "Nhập mật khẩu...",
                             password=True,
-                            prefix_icon=ft.Icons.LOCK_OUTLINE,
-                            value="123456")
+                            prefix_icon=ft.Icons.LOCK_OUTLINE)
 
     tf_confirm = text_input("Xác nhận mật khẩu", "Nhập lại...",
                            password=True,
-                           prefix_icon=ft.Icons.LOCK_RESET_OUTLINED,
-                           value="123456")
+                           prefix_icon=ft.Icons.LOCK_RESET_OUTLINED)
 
     err_text = ft.Text("", color=Colors.ERROR,
                        size=Typography.SMALL,
@@ -53,7 +49,7 @@ def build_auth_screen(page: ft.Page, on_login_success):
     title_ref = ft.Ref[ft.Text]()
     sub_ref = ft.Ref[ft.Text]()
     toggle_prompt_ref = ft.Ref[ft.Text]()
-    toggle_btn_ref = ft.Ref[ft.TextButton]()
+    toggle_btn_text_ref = ft.Ref[ft.Text]()
 
     # ── EVENTS ────────────────────────────
     def clear_err(_=None):
@@ -119,8 +115,14 @@ def build_auth_screen(page: ft.Page, on_login_success):
         sub_ref.current.value = "Đăng nhập để tiếp tục" if mode else "Tạo tài khoản mới"
 
         toggle_prompt_ref.current.value = "Chưa có tài khoản?" if mode else "Đã có tài khoản?"
-        toggle_btn_ref.current.text = "Đăng ký" if mode else "Đăng nhập"
+        toggle_btn_text_ref.current.value = "Đăng ký" if mode else "Đăng nhập"
 
+        # Clear all fields when switching modes
+        tf_username.value = ""
+        tf_password.value = ""
+        tf_email.value = ""
+        tf_fullname.value = ""
+        tf_confirm.value = ""
         err_text.value = ""
         page.update()
 
@@ -189,12 +191,12 @@ def build_auth_screen(page: ft.Page, on_login_success):
                 size=12,
                 color=Colors.TEXT_MUTED),
 
-        ft.TextButton("Đăng ký",
-                      ref=toggle_btn_ref,
-                      on_click=switch_mode,
-                      style=ft.ButtonStyle(
-                          color=Colors.PRIMARY
-                      ))
+        ft.TextButton(
+                      content=ft.Text("Đăng ký",
+                                      ref=toggle_btn_text_ref,
+                                      size=12,
+                                      color=Colors.PRIMARY),
+                      on_click=switch_mode)
     ], alignment=ft.MainAxisAlignment.CENTER)
 
     # ── CARD ──────────────────────────────
@@ -214,7 +216,7 @@ def build_auth_screen(page: ft.Page, on_login_success):
         padding=24,
         border_radius=16,
         bgcolor=Colors.BG_CARD,
-        border=ft.border.all(1, Colors.BORDER),
+        border=ft.Border.all(1, Colors.BORDER),
         shadow=ft.BoxShadow(
             blur_radius=30,
             color="#10000000",

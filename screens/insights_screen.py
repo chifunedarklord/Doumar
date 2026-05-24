@@ -41,10 +41,25 @@ def build_insights_screen(page: ft.Page, user, on_navigate):
         procrastinate = report.get("procrastination", {})
         workload     = report.get("workload", {})
 
+        from core.services import TaskService as _TS
+        from datetime import date as _date
+        _tasks_all = _TS.get_tasks(user.id)
+        _today_str = _date.today().isoformat()
+        _total = len(_tasks_all)
+        _done  = sum(1 for t in _tasks_all if t.status == "done")
+        _overdue = sum(1 for t in _tasks_all if t.is_overdue)
+        _today_cnt = sum(1 for t in _tasks_all
+                         if t.due_date == _today_str and t.status != "done")
+        _focus_mins = report.get("total_focus_minutes", 0)
+
         return ft.Column([
             _build_header(user),
             ft.Container(
                 content=ft.Column([
+                    # Quick summary
+                    _build_quick_summary(_total, _done, _overdue, _today_cnt, _focus_mins),
+                    ft.Container(height=Spacing.MD),
+
                     # Status trio
                     _build_status_trio(weekly_score, energy, stress),
                     ft.Container(height=Spacing.MD),
@@ -783,6 +798,62 @@ def _build_procrastination_card(procrastinate: dict, workload: dict):
         padding=Spacing.MD, border_radius=Radius.LG,
         bgcolor=Colors.BG_CARD,
         border=ft.Border.all(1, f"#40{p_color[1:]}" if p_color.startswith("#") else p_color),
+        shadow=ft.BoxShadow(blur_radius=12, color="#00000018", offset=ft.Offset(0, 3)),
+    )
+
+
+def _build_quick_summary(total: int, done: int, overdue: int,
+                         today_cnt: int, focus_mins: int) -> ft.Container:
+    """Compact overview card at the top of Insights — quick glance for demo."""
+    completion_rate = int(done / total * 100) if total else 0
+    focus_h = focus_mins // 60
+    focus_m = focus_mins % 60
+    focus_str = f"{focus_h}h{focus_m:02d}m" if focus_h else f"{focus_mins}p"
+
+    rate_color  = Colors.SUCCESS if completion_rate >= 70 else Colors.WARNING if completion_rate >= 40 else Colors.ERROR
+    over_color  = Colors.ERROR if overdue > 0 else Colors.SUCCESS
+    today_color = Colors.PRIMARY if today_cnt > 0 else Colors.SUCCESS
+
+    # Actionable tips per metric
+    rate_tip  = "Tiếp tục duy trì!" if completion_rate >= 70 else "Tập trung hoàn thành task tồn đọng."
+    over_tip  = "Không có task quá hạn!" if overdue == 0 else f"Giải quyết {overdue} task quá hạn ngay."
+    today_tip = "Không có task hôm nay!" if today_cnt == 0 else f"{today_cnt} task cần xong hôm nay."
+    focus_tip = "Chưa có phiên Focus." if focus_mins == 0 else "Tăng dần thời gian mỗi ngày."
+
+    def _stat_col(icon, value, label, color, tip):
+        return ft.Column([
+            ft.Text(icon, size=22, text_align=ft.TextAlign.CENTER),
+            ft.Text(value, size=Typography.H3, color=color, weight=ft.FontWeight.BOLD,
+                    text_align=ft.TextAlign.CENTER),
+            ft.Text(label, size=7, color=Colors.TEXT_MUTED, text_align=ft.TextAlign.CENTER),
+            ft.Container(height=4),
+            ft.Container(
+                content=ft.Text(tip, size=7, color=color, text_align=ft.TextAlign.CENTER,
+                                max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
+                padding=ft.padding.symmetric(horizontal=4, vertical=3),
+                border_radius=Radius.SM,
+                bgcolor=f"#15{color[1:]}" if color.startswith("#") else Colors.BG_SURFACE,
+            ),
+        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2, tight=True, expand=True)
+
+    return ft.Container(
+        content=ft.Column([
+            ft.Row([
+                ft.Text("📈", size=16),
+                ft.Text("Tổng quan hôm nay", size=Typography.H4,
+                        color=Colors.TEXT_PRIMARY, weight=ft.FontWeight.BOLD, expand=True),
+            ], spacing=Spacing.SM),
+            ft.Container(height=Spacing.SM),
+            ft.Row([
+                _stat_col("✅", f"{completion_rate}%",  "Hoàn thành", rate_color,  rate_tip),
+                _stat_col("⚠️", str(overdue),           "Quá hạn",    over_color,  over_tip),
+                _stat_col("📅", str(today_cnt),         "Hôm nay",    today_color, today_tip),
+                _stat_col("🎯", focus_str,              "Focus",      Colors.PRIMARY, focus_tip),
+            ], spacing=Spacing.SM),
+        ], spacing=0, tight=True),
+        padding=Spacing.MD, border_radius=Radius.LG,
+        bgcolor=Colors.BG_CARD,
+        border=ft.Border.all(1, Colors.BORDER),
         shadow=ft.BoxShadow(blur_radius=12, color="#00000018", offset=ft.Offset(0, 3)),
     )
 

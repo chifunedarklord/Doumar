@@ -121,7 +121,7 @@ def build_report_screen(page: ft.Page, user, on_navigate):
                 ], expand=True, spacing=0, tight=True),
             ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
             padding=Spacing.MD, border_radius=Radius.LG, bgcolor=Colors.BG_CARD,
-            border=ft.border.all(1, Colors.BORDER),
+            border=ft.Border.all(1, Colors.BORDER),
             shadow=ft.BoxShadow(blur_radius=12, color="#00000018", offset=ft.Offset(0, 3)),
         )
 
@@ -191,7 +191,7 @@ def build_report_screen(page: ft.Page, user, on_navigate):
                         size=Typography.TINY, color=Colors.TEXT_MUTED),
             ], spacing=0, tight=True),
             padding=Spacing.MD, border_radius=Radius.LG, bgcolor=Colors.BG_CARD,
-            border=ft.border.all(1, Colors.BORDER),
+            border=ft.Border.all(1, Colors.BORDER),
             shadow=ft.BoxShadow(blur_radius=12, color="#00000018", offset=ft.Offset(0, 3)),
         )
 
@@ -208,7 +208,7 @@ def build_report_screen(page: ft.Page, user, on_navigate):
                 ),
             ], spacing=0, tight=True),
             padding=Spacing.MD, border_radius=Radius.LG, bgcolor=Colors.BG_CARD,
-            border=ft.border.all(1, Colors.BORDER),
+            border=ft.Border.all(1, Colors.BORDER),
             shadow=ft.BoxShadow(blur_radius=12, color="#00000018", offset=ft.Offset(0, 3)),
         )
 
@@ -253,7 +253,7 @@ def build_report_screen(page: ft.Page, user, on_navigate):
                 ft.Container(height=Spacing.MD), cat_bars,
             ], spacing=0, tight=True),
             padding=Spacing.MD, border_radius=Radius.LG, bgcolor=Colors.BG_CARD,
-            border=ft.border.all(1, Colors.BORDER),
+            border=ft.Border.all(1, Colors.BORDER),
             shadow=ft.BoxShadow(blur_radius=12, color="#00000018", offset=ft.Offset(0, 3)),
         )
 

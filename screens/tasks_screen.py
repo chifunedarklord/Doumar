@@ -1,4 +1,4 @@
-"""
+﻿"""
 TaskFlow - Tasks Management Screen
 Quản lý công việc với filter, search, add/edit/delete.
 """
@@ -21,6 +21,7 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
     filter_cat    = {"v": "all"}
     filter_status = {"v": "all"}
     filter_pri    = {"v": "all"}
+    filter_proj   = {"v": "all"}   # "all" | "none" | project_id
 
     def get_filtered_tasks():
         tasks = TaskService.get_tasks(user.id)
@@ -33,6 +34,10 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
             tasks = [t for t in tasks if t.status == filter_status["v"]]
         if filter_pri["v"] != "all":
             tasks = [t for t in tasks if t.priority == filter_pri["v"]]
+        if filter_proj["v"] == "none":
+            tasks = [t for t in tasks if not getattr(t, "project_id", None)]
+        elif filter_proj["v"] != "all":
+            tasks = [t for t in tasks if getattr(t, "project_id", None) == filter_proj["v"]]
         def sort_key(t: Task):
             pri_order = {"high": 0, "medium": 1, "low": 2}
             return (0 if t.is_overdue else 1, t.due_date or "9999", pri_order.get(t.priority, 1))
@@ -47,7 +52,7 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
     # ── Delete confirm ────────────────────────────────────────
     def delete_task(task_id: str):
         def confirm(_):
-            TaskService.delete_task(task_id)
+            TaskService.delete_task(task_id, user_id=user.id)
             _del_bs[0].open = False
             page.update()
             refresh_list()
@@ -87,7 +92,7 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
                             height=48, expand=True,
                             border_radius=Radius.MD,
                             bgcolor=Colors.BG_SURFACE,
-                            border=ft.border.all(1, Colors.BORDER),
+                            border=ft.Border.all(1, Colors.BORDER),
                             alignment=ft.Alignment.CENTER,
                             on_click=cancel, ink=True,
                         ),
@@ -119,7 +124,7 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
             content=ft.Container(
                 content=del_sheet,
                 bgcolor=Colors.BG_CARD,
-                border_radius=ft.border_radius.only(
+                border_radius=ft.BorderRadius.only(
                     top_left=Radius.XL, top_right=Radius.XL,
                 ),
                 padding=0,
@@ -184,18 +189,16 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
                 for pid2, r in proj_item_refs.items():
                     if r.current:
                         sel2 = selected_pid["v"] == pid2
-                        r.current.bgcolor = f"#20{all_projects[0].color[1:]}" if sel2 else "transparent"
-                        # Update border
                         proj2 = next((x for x in all_projects if x.id == pid2), None)
                         if proj2:
                             r.current.bgcolor = f"#20{proj2.color[1:]}" if sel2 else "transparent"
-                            r.current.border = ft.Border.all(2, proj2.color if sel2 else Colors.BORDER)
-                        # Checkmark
+                            r.current.border = ft.Border.all(2 if sel2 else 1,
+                                                              proj2.color if sel2 else Colors.BORDER)
                         row = r.current.content
                         if isinstance(row, ft.Row) and len(row.controls) >= 3:
                             row.controls[-1].color = (
-                                proj2.color if sel2 else "transparent"
-                            ) if proj2 else "transparent"
+                                proj2.color if (sel2 and proj2) else "transparent"
+                            )
                 page.update()
 
             return ft.GestureDetector(
@@ -228,13 +231,9 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
             if remove_ref.current:
                 remove_ref.current.bgcolor = "#20FF0000"
                 remove_ref.current.border = ft.Border.all(2, Colors.ERROR)
-            for _, r in proj_item_refs.items():
+            for pid2, r in proj_item_refs.items():
                 if r.current:
                     r.current.bgcolor = "transparent"
-                    proj2 = next((x for x in all_projects
-                                  if x.id == next(
-                                      (pid for pid, rr in proj_item_refs.items() if rr is r), None
-                                  )), None)
                     r.current.border = ft.Border.all(1, Colors.BORDER)
                     row = r.current.content
                     if isinstance(row, ft.Row) and len(row.controls) >= 3:
@@ -658,7 +657,7 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
                         c = chips_list[i]
                         sel = (ck == k)
                         c.bgcolor = Colors.PRIMARY if sel else "transparent"
-                        c.border  = ft.border.all(1.5, Colors.PRIMARY) if sel else ft.border.all(1, Colors.BORDER)
+                        c.border  = ft.Border.all(1.5, Colors.PRIMARY) if sel else ft.Border.all(1, Colors.BORDER)
                         c.content.controls[1].color = Colors.TEXT_ON_PRIMARY if sel else Colors.TEXT_MUTED
                     update_fn()
                 return _click
@@ -685,6 +684,63 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
     cat_filter = filter_row("Danh mục",   CATEGORY_MAP, filter_cat, refresh_list)
     pri_filter = filter_row("Ưu tiên",    PRIORITY_MAP, filter_pri, refresh_list)
     sta_filter = filter_row("Trạng thái", STATUS_MAP,   filter_status, refresh_list)
+
+    # ── Project filter (manual chips, not dict-based) ─────────
+    _all_projects_for_filter = ProjectService.get_projects(user.id)
+    _proj_filter_chips = []
+
+    def _make_proj_filter_click(key, chips_list):
+        def _click(_):
+            filter_proj["v"] = key
+            for i, c in enumerate(chips_list):
+                sel = (i == list({
+                    "all": 0, "none": 1,
+                    **{p.id: 2 + idx for idx, p in enumerate(_all_projects_for_filter)}
+                }.values())[i] if False else False)  # placeholder
+            # Simpler: rebuild chip styles
+            keys = ["all", "none"] + [p.id for p in _all_projects_for_filter]
+            for i, c in enumerate(chips_list):
+                s = (keys[i] == key)
+                c.bgcolor = Colors.PRIMARY if s else "transparent"
+                c.border  = ft.Border.all(1.5 if s else 1,
+                                           Colors.PRIMARY if s else Colors.BORDER)
+                if c.content and isinstance(c.content, ft.Row) and c.content.controls:
+                    c.content.controls[-1].color = Colors.TEXT_ON_PRIMARY if s else Colors.TEXT_MUTED
+            refresh_list()
+        return _click
+
+    def _proj_chip(label, key):
+        sel = filter_proj["v"] == key
+        c = ft.Container(
+            content=ft.Row([
+                ft.Text("✦" if key == "all" else ("📂" if key == "none" else "●"), size=10,
+                        color=Colors.TEXT_ON_PRIMARY if sel else Colors.TEXT_MUTED),
+                ft.Text(label, size=Typography.TINY,
+                        color=Colors.TEXT_ON_PRIMARY if sel else Colors.TEXT_MUTED),
+            ], spacing=4, tight=True),
+            padding=ft.Padding.symmetric(horizontal=10, vertical=5),
+            border_radius=Radius.FULL,
+            bgcolor=Colors.PRIMARY if sel else "transparent",
+            border=ft.Border.all(1.5 if sel else 1,
+                                  Colors.PRIMARY if sel else Colors.BORDER),
+        )
+        _proj_filter_chips.append(c)
+        return c
+
+    _proj_chip_controls = (
+        [_proj_chip("Tất cả", "all"), _proj_chip("Chưa có dự án", "none")] +
+        [_proj_chip(p.name[:14], p.id) for p in _all_projects_for_filter]
+    )
+    for i, c in enumerate(_proj_filter_chips):
+        c.on_click = _make_proj_filter_click(
+            (["all", "none"] + [p.id for p in _all_projects_for_filter])[i],
+            _proj_filter_chips,
+        )
+
+    proj_filter = ft.Row([
+        ft.Text("Dự án", size=Typography.TINY, color=Colors.TEXT_MUTED, width=60),
+        ft.Row(_proj_chip_controls, scroll=ft.ScrollMode.AUTO, spacing=Spacing.XS, expand=True),
+    ], vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
     # ── Search & Filter Panel ─────────────────────────────────
     search_field = ft.TextField(
@@ -723,6 +779,8 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
                 pri_filter,
                 ft.Container(height=Spacing.SM),
                 sta_filter,
+                ft.Container(height=Spacing.SM),
+                proj_filter,
                 ft.Container(height=Spacing.XL),
                 ft.Container(
                     content=primary_button("Xong", on_click=close_filter_sheet, width=200),
@@ -738,7 +796,7 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
         content=ft.Container(
             content=filter_sheet_content,
             bgcolor=Colors.BG_CARD,
-            border_radius=ft.border_radius.only(
+            border_radius=ft.BorderRadius.only(
                 top_left=Radius.XL, top_right=Radius.XL,
             ),
             padding=0,
@@ -770,6 +828,344 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
         alignment=ft.Alignment.CENTER,
     )
 
+    # ── AI Quick-Add (natural language) ──────────────────────
+    def _open_ai_quick_add(_):
+        _ai_input_tf = ft.TextField(
+            hint_text='VD: "Mai 8h nhắc nộp báo cáo đồ họa"',
+            hint_style=ft.TextStyle(color=Colors.TEXT_MUTED, size=Typography.SMALL),
+            bgcolor=Colors.BG_CARD,
+            border_color=Colors.BORDER,
+            focused_border_color=Colors.PRIMARY,
+            text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY),
+            border_radius=Radius.MD,
+            cursor_color=Colors.PRIMARY,
+            multiline=False,
+            autofocus=True,
+            content_padding=ft.padding.symmetric(horizontal=14, vertical=12),
+        )
+        _status_text = ft.Text("", size=Typography.TINY, color=Colors.TEXT_MUTED,
+                               text_align=ft.TextAlign.CENTER)
+        _parsing = {"running": False}
+
+        def _do_parse(_):
+            raw = _ai_input_tf.value.strip()
+            if not raw:
+                return
+            if _parsing["running"]:
+                return
+            _parsing["running"] = True
+            _status_text.value = "AI đang phân tích…"
+            _status_text.color = Colors.PRIMARY
+            _ai_input_tf.disabled = True
+            page.update()
+
+            def _run():
+                from utils.ai_helper import parse_natural_task
+                data = parse_natural_task(raw, user.id)
+                _parsing["running"] = False
+                _ai_input_tf.disabled = False
+                try:
+                    page.run_task(lambda: _show_confirm(data, raw))
+                except Exception:
+                    _show_confirm(data, raw)
+
+            import threading as _t
+            _t.Thread(target=_run, daemon=True).start()
+
+        def _show_confirm(data: dict, original_text: str):
+            ai_bs[0].open = False
+            page.update()
+            _open_confirm_sheet(data)
+
+        send_btn_ai = ft.Container(
+            content=ft.Icon(ft.Icons.AUTO_AWESOME_ROUNDED, color="white", size=18),
+            width=44, height=44,
+            border_radius=Radius.MD,
+            gradient=ft.LinearGradient(
+                colors=["#A855F7", "#3B82F6"],
+                begin=ft.Alignment.TOP_LEFT,
+                end=ft.Alignment.BOTTOM_RIGHT,
+            ),
+            alignment=ft.Alignment.CENTER,
+            on_click=_do_parse,
+            ink=True,
+        )
+
+        sheet_content = ft.Column([
+            ft.Container(
+                content=ft.Container(width=40, height=4, border_radius=Radius.FULL,
+                                     bgcolor="#444444"),
+                alignment=ft.Alignment.CENTER,
+                padding=ft.padding.only(top=12, bottom=8),
+            ),
+            ft.Container(
+                content=ft.Column([
+                    ft.Row([
+                        ft.Container(
+                            content=ft.Icon(ft.Icons.AUTO_AWESOME_ROUNDED, size=16, color="white"),
+                            width=32, height=32, border_radius=16,
+                            gradient=ft.LinearGradient(colors=["#A855F7", "#3B82F6"],
+                                                       begin=ft.Alignment.TOP_LEFT,
+                                                       end=ft.Alignment.BOTTOM_RIGHT),
+                            alignment=ft.Alignment.CENTER,
+                        ),
+                        ft.Text("AI Tạo Task Nhanh", size=Typography.H3,
+                                color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
+                    ], spacing=Spacing.SM),
+                    ft.Text("Nhập mô tả công việc bằng tiếng Việt tự nhiên",
+                            size=Typography.TINY, color=Colors.TEXT_MUTED),
+                    ft.Container(height=Spacing.MD),
+                    ft.Row([_ai_input_tf, send_btn_ai], spacing=Spacing.SM),
+                    ft.Container(height=6),
+                    _status_text,
+                    ft.Container(height=Spacing.MD),
+                    ft.Row([
+                        ft.Text("VD: ", size=Typography.TINY, color=Colors.TEXT_MUTED),
+                        ft.Text('"Tuần sau họp khách hàng lúc 14h"',
+                                size=Typography.TINY, color=Colors.TEXT_MUTED,
+                                italic=True),
+                    ], spacing=4),
+                ], spacing=0, tight=True),
+                padding=ft.padding.symmetric(horizontal=Spacing.LG),
+            ),
+            ft.Container(height=Spacing.XL),
+        ], spacing=0, tight=True)
+
+        bs = ft.BottomSheet(
+            content=ft.Container(
+                content=sheet_content,
+                bgcolor=Colors.BG_CARD,
+                border_radius=ft.BorderRadius.only(top_left=Radius.XL, top_right=Radius.XL),
+                padding=0,
+                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+            ),
+            open=True, draggable=True, use_safe_area=True,
+        )
+        ai_bs = [bs]
+        page.overlay.append(bs)
+        page.update()
+
+    def _open_confirm_sheet(data: dict):
+        """Show pre-filled task fields for user to confirm before saving."""
+        from core.models import Task as _Task
+
+        cat_opts = {"personal": "👤 Cá nhân", "work": "💼 Công việc",
+                    "health": "❤️ Sức khoẻ", "finance": "💰 Tài chính",
+                    "education": "📚 Học tập"}
+        pri_opts = {"high": "🔴 Cao", "medium": "🟡 Vừa", "low": "🔵 Thấp"}
+        cat_sel = {"v": data.get("category", "personal")}
+        pri_sel = {"v": data.get("priority", "medium")}
+
+        tf_title = ft.TextField(
+            value=data.get("title", ""),
+            label="Tiêu đề",
+            bgcolor=Colors.BG_SURFACE, border_color=Colors.BORDER,
+            focused_border_color=Colors.PRIMARY,
+            text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY, size=Typography.BODY),
+            label_style=ft.TextStyle(color=Colors.TEXT_MUTED, size=Typography.TINY),
+            border_radius=Radius.MD, cursor_color=Colors.PRIMARY,
+            content_padding=ft.padding.symmetric(horizontal=12, vertical=10),
+        )
+        tf_desc = ft.TextField(
+            value=data.get("description", ""),
+            label="Mô tả",
+            bgcolor=Colors.BG_SURFACE, border_color=Colors.BORDER,
+            focused_border_color=Colors.PRIMARY,
+            text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY, size=Typography.SMALL),
+            label_style=ft.TextStyle(color=Colors.TEXT_MUTED, size=Typography.TINY),
+            border_radius=Radius.MD, cursor_color=Colors.PRIMARY,
+            content_padding=ft.padding.symmetric(horizontal=12, vertical=10),
+        )
+
+        due_str = data.get("due_date") or ""
+        time_str = data.get("due_time") or ""
+        tf_due  = ft.TextField(
+            value=due_str, label="Hạn (YYYY-MM-DD)",
+            bgcolor=Colors.BG_SURFACE, border_color=Colors.BORDER,
+            focused_border_color=Colors.PRIMARY,
+            text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY, size=Typography.SMALL),
+            label_style=ft.TextStyle(color=Colors.TEXT_MUTED, size=Typography.TINY),
+            border_radius=Radius.MD, cursor_color=Colors.PRIMARY,
+            content_padding=ft.padding.symmetric(horizontal=12, vertical=10),
+            expand=True,
+        )
+        tf_time = ft.TextField(
+            value=time_str, label="Giờ (HH:MM)",
+            bgcolor=Colors.BG_SURFACE, border_color=Colors.BORDER,
+            focused_border_color=Colors.PRIMARY,
+            text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY, size=Typography.SMALL),
+            label_style=ft.TextStyle(color=Colors.TEXT_MUTED, size=Typography.TINY),
+            border_radius=Radius.MD, cursor_color=Colors.PRIMARY,
+            content_padding=ft.padding.symmetric(horizontal=12, vertical=10),
+            expand=True,
+        )
+
+        # Category chips
+        cat_chip_refs = {}
+        def _cat_chip(key, label):
+            ref = ft.Ref[ft.Container]()
+            cat_chip_refs[key] = ref
+            is_sel = cat_sel["v"] == key
+            def _tap(_, k=key):
+                cat_sel["v"] = k
+                for k2, r2 in cat_chip_refs.items():
+                    if r2.current:
+                        s2 = k2 == k
+                        r2.current.bgcolor = Colors.PRIMARY if s2 else Colors.BG_SURFACE
+                        r2.current.border = ft.Border.all(1, Colors.PRIMARY if s2 else Colors.BORDER)
+                        if r2.current.content:
+                            r2.current.content.color = "white" if s2 else Colors.TEXT_MUTED
+                page.update()
+            return ft.GestureDetector(
+                on_tap=_tap,
+                content=ft.Container(
+                    ref=ref,
+                    content=ft.Text(label, size=7,
+                                    color="white" if is_sel else Colors.TEXT_MUTED),
+                    padding=ft.padding.symmetric(horizontal=10, vertical=5),
+                    border_radius=Radius.FULL,
+                    bgcolor=Colors.PRIMARY if is_sel else Colors.BG_SURFACE,
+                    border=ft.Border.all(1, Colors.PRIMARY if is_sel else Colors.BORDER),
+                ),
+            )
+
+        pri_chip_refs = {}
+        pri_colors = {"high": Colors.ERROR, "medium": Colors.WARNING, "low": Colors.PRIMARY}
+        def _pri_chip(key, label):
+            ref = ft.Ref[ft.Container]()
+            pri_chip_refs[key] = ref
+            is_sel = pri_sel["v"] == key
+            color = pri_colors.get(key, Colors.PRIMARY)
+            def _tap(_, k=key):
+                pri_sel["v"] = k
+                for k2, r2 in pri_chip_refs.items():
+                    if r2.current:
+                        s2 = k2 == k
+                        c2 = pri_colors.get(k2, Colors.PRIMARY)
+                        r2.current.bgcolor = f"#20{c2[1:]}" if s2 else Colors.BG_SURFACE
+                        r2.current.border = ft.Border.all(1, c2 if s2 else Colors.BORDER)
+                        if r2.current.content:
+                            r2.current.content.color = c2 if s2 else Colors.TEXT_MUTED
+                page.update()
+            return ft.GestureDetector(
+                on_tap=_tap,
+                content=ft.Container(
+                    ref=ref,
+                    content=ft.Text(label, size=7,
+                                    color=color if is_sel else Colors.TEXT_MUTED),
+                    padding=ft.padding.symmetric(horizontal=10, vertical=5),
+                    border_radius=Radius.FULL,
+                    bgcolor=f"#20{color[1:]}" if is_sel else Colors.BG_SURFACE,
+                    border=ft.Border.all(1, color if is_sel else Colors.BORDER),
+                ),
+            )
+
+        def _save_confirmed(_):
+            title = tf_title.value.strip()
+            if not title:
+                snack(page, "⚠️ Tiêu đề không được để trống!")
+                return
+            now_str = datetime.now().isoformat()
+            new_t = _Task(
+                id=str(uuid.uuid4()),
+                user_id=user.id,
+                title=title,
+                description=tf_desc.value.strip(),
+                category=cat_sel["v"],
+                priority=pri_sel["v"],
+                status="todo",
+                due_date=tf_due.value.strip() or None,
+                due_time=tf_time.value.strip() or None,
+                estimated_minutes=data.get("estimated_minutes", 30),
+                reminder_minutes=data.get("reminder_minutes", 0),
+                created_at=now_str,
+                updated_at=now_str,
+            )
+            TaskService.save_task(new_t)
+            confirm_bs[0].open = False
+            page.update()
+            refresh_list()
+            snack(page, f"✓ Đã tạo: {title}")
+
+        def _cancel_confirm(_):
+            confirm_bs[0].open = False
+            page.update()
+
+        sheet = ft.Column([
+            ft.Container(
+                content=ft.Container(width=40, height=4, border_radius=Radius.FULL,
+                                     bgcolor="#444444"),
+                alignment=ft.Alignment.CENTER,
+                padding=ft.padding.only(top=12, bottom=8),
+            ),
+            ft.Container(
+                content=ft.Column([
+                    ft.Row([
+                        ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE, size=18, color=Colors.SUCCESS),
+                        ft.Text("Xác nhận Task từ AI", size=Typography.H3,
+                                color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
+                    ], spacing=Spacing.SM),
+                    ft.Text("Chỉnh sửa nếu cần, sau đó bấm Lưu",
+                            size=Typography.TINY, color=Colors.TEXT_MUTED),
+                    ft.Container(height=Spacing.SM),
+                    tf_title,
+                    ft.Container(height=Spacing.XS),
+                    tf_desc,
+                    ft.Container(height=Spacing.XS),
+                    ft.Row([tf_due, ft.Container(width=8), tf_time]),
+                    ft.Container(height=Spacing.SM),
+                    ft.Text("Danh mục", size=Typography.TINY, color=Colors.TEXT_MUTED),
+                    ft.Container(height=4),
+                    ft.Row([_cat_chip(k, v) for k, v in cat_opts.items()],
+                           spacing=4, wrap=True),
+                    ft.Container(height=Spacing.SM),
+                    ft.Text("Ưu tiên", size=Typography.TINY, color=Colors.TEXT_MUTED),
+                    ft.Container(height=4),
+                    ft.Row([_pri_chip(k, v) for k, v in pri_opts.items()], spacing=4),
+                    ft.Container(height=Spacing.MD),
+                    ft.Row([
+                        ft.Container(
+                            content=ft.Text("Hủy", size=Typography.BODY,
+                                            color=Colors.TEXT_MUTED),
+                            height=44, expand=True, border_radius=Radius.MD,
+                            bgcolor=Colors.BG_SURFACE,
+                            border=ft.Border.all(1, Colors.BORDER),
+                            alignment=ft.Alignment.CENTER,
+                            on_click=_cancel_confirm, ink=True,
+                        ),
+                        ft.Container(width=8),
+                        ft.Container(
+                            content=ft.Row([
+                                ft.Icon(ft.Icons.SAVE_OUTLINED, size=16, color="white"),
+                                ft.Text("Lưu Task", size=Typography.BODY,
+                                        color="white", weight=Typography.SEMIBOLD),
+                            ], alignment=ft.MainAxisAlignment.CENTER, spacing=4),
+                            height=44, expand=True, border_radius=Radius.MD,
+                            bgcolor=Colors.PRIMARY,
+                            alignment=ft.Alignment.CENTER,
+                            on_click=_save_confirmed, ink=True,
+                        ),
+                    ]),
+                    ft.Container(height=Spacing.XXL),
+                ], spacing=0, tight=True),
+                padding=ft.padding.symmetric(horizontal=Spacing.LG),
+            ),
+        ], spacing=0, tight=True)
+
+        cbs = ft.BottomSheet(
+            content=ft.Container(
+                content=sheet,
+                bgcolor=Colors.BG_CARD,
+                border_radius=ft.BorderRadius.only(top_left=Radius.XL, top_right=Radius.XL),
+                padding=0,
+                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+            ),
+            open=True, draggable=True, use_safe_area=True,
+        )
+        confirm_bs = [cbs]
+        page.overlay.append(cbs)
+        page.update()
+
     # ── Header ────────────────────────────────────────────────
     header = ft.Container(
         content=ft.Row([
@@ -781,9 +1177,22 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
             ], spacing=2, tight=True),
             ft.Row([], expand=True),
             ft.Container(
-                content=primary_button("+ Thêm", on_click=lambda _: on_navigate("task_edit"),
-                                    height=38, width=100),
+                content=ft.Icon(ft.Icons.AUTO_AWESOME_ROUNDED, color="white", size=16),
+                width=38, height=38,
+                border_radius=Radius.MD,
+                gradient=ft.LinearGradient(
+                    colors=["#A855F7", "#3B82F6"],
+                    begin=ft.Alignment.TOP_LEFT,
+                    end=ft.Alignment.BOTTOM_RIGHT,
+                ),
+                alignment=ft.Alignment.CENTER,
+                on_click=_open_ai_quick_add,
+                ink=True,
+                tooltip="Tạo task bằng AI",
+                margin=ft.margin.only(right=8),
             ),
+            primary_button("+ Thêm", on_click=lambda _: on_navigate("task_edit"),
+                           height=38, width=90),
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
            vertical_alignment=ft.CrossAxisAlignment.CENTER),
         padding=ft.padding.symmetric(horizontal=Spacing.MD, vertical=Spacing.MD),

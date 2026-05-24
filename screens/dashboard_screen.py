@@ -33,6 +33,20 @@ def build_dashboard(page: ft.Page, user, on_navigate):
     today_tasks = [t for t in tasks if t.due_date == today_str and t.status != "done"]
     completion_pct = int(done / total * 100) if total else 0
 
+    # ── Today focus time ─────────────────────────────────────
+    try:
+        from core.database import Storage as _Storage
+        all_sessions = _Storage.get_work_sessions(user.id, limit=100)
+        focus_today_mins = sum(
+            s.get("duration_minutes", 0) if isinstance(s, dict)
+            else getattr(s, "duration_minutes", 0)
+            for s in all_sessions
+            if (s.get("started_at", "") if isinstance(s, dict)
+                else getattr(s, "started_at", "")).startswith(today_str)
+        )
+    except Exception:
+        focus_today_mins = 0
+
     # ── AI Data (Cached) ─────────────────────────────────────
     try:
         report = AnalyticsService.get_full_report(user.id)
@@ -140,22 +154,45 @@ def build_dashboard(page: ft.Page, user, on_navigate):
         width=60, height=60,
     )
 
+    focus_h   = focus_today_mins // 60
+    focus_m   = focus_today_mins % 60
+    focus_str = f"{focus_h}h{focus_m:02d}" if focus_h else f"{focus_today_mins}p"
+
     overview_card = ft.Container(
-        content=ft.Row([
-            ft.Column([
-                ft.Text("Tổng quan công việc", size=Typography.H4,
-                        color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
-                ft.Container(height=2),
-                ft.Row([
-                    _mini_stat(str(total),   "Tổng",       Colors.PRIMARY),
-                    _mini_stat(str(done),    "Hoàn thành", Colors.SUCCESS),
-                    _mini_stat(str(in_prog), "Đang làm",   Colors.ACCENT_CYAN),
-                    _mini_stat(str(overdue), "Quá hạn",    Colors.ERROR),
-                ], spacing=Spacing.SM),
-            ], spacing=0, expand=True),
-            progress_ring,
-        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-           vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        content=ft.Column([
+            ft.Row([
+                ft.Column([
+                    ft.Text("Tổng quan công việc", size=Typography.H4,
+                            color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
+                    ft.Container(height=2),
+                    ft.Row([
+                        _mini_stat(str(total),          "Tổng",       Colors.PRIMARY),
+                        _mini_stat(str(done),           "Xong",       Colors.SUCCESS),
+                        _mini_stat(str(in_prog),        "Đang làm",   Colors.ACCENT_CYAN),
+                        _mini_stat(str(overdue),        "Quá hạn",    Colors.ERROR),
+                        _mini_stat(str(len(today_tasks)),"Hôm nay",   Colors.WARNING),
+                    ], spacing=Spacing.SM),
+                ], spacing=0, expand=True),
+                progress_ring,
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+               vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ft.Container(height=Spacing.XS),
+            ft.Container(
+                content=ft.Row([
+                    ft.Icon(ft.Icons.TIMER_OUTLINED, size=13, color=Colors.PRIMARY),
+                    ft.Text(f"Focus hôm nay: ", size=Typography.TINY, color=Colors.TEXT_MUTED),
+                    ft.Text(focus_str, size=Typography.TINY, color=Colors.PRIMARY,
+                            weight=Typography.SEMIBOLD),
+                    ft.Container(width=8),
+                    ft.Text(f"{completion_pct}% hoàn thành", size=Typography.TINY,
+                            color=Colors.SUCCESS if completion_pct >= 50 else Colors.TEXT_MUTED),
+                ], spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                padding=ft.padding.symmetric(horizontal=6, vertical=4),
+                border_radius=Radius.SM,
+                bgcolor=Colors.PRIMARY_BG,
+                border=ft.Border.all(1, Colors.PRIMARY_BORDER),
+            ),
+        ], spacing=0, tight=True),
         padding=Spacing.SM, border_radius=Radius.LG,
         gradient=ft.LinearGradient(colors=[Colors.BG_CARD, Colors.BG_SURFACE],
                                    begin=ft.Alignment.TOP_LEFT, end=ft.Alignment.BOTTOM_RIGHT),
@@ -306,7 +343,7 @@ def build_dashboard(page: ft.Page, user, on_navigate):
                        "Tất cả", lambda _: on_navigate("tasks")),
         ft.Container(height=Spacing.SM),
         ft.Column(
-            [schedule_item(slot) for slot in schedule_slots] if schedule_slots
+            [schedule_item(slot) for slot in schedule_slots if slot.get("task")] if schedule_slots
             else [ft.Text("🎉 Không có việc cần làm!", size=Typography.BODY,
                           color=Colors.TEXT_MUTED, text_align=ft.TextAlign.CENTER)],
             spacing=0, tight=True,
@@ -355,9 +392,79 @@ def build_dashboard(page: ft.Page, user, on_navigate):
                    alignment=ft.MainAxisAlignment.SPACE_AROUND),
         ], spacing=0, tight=True),
         padding=Spacing.MD, border_radius=Radius.LG, bgcolor=Colors.BG_CARD,
-        border=ft.border.all(1, Colors.BORDER),
+        border=ft.Border.all(1, Colors.BORDER),
         shadow=ft.BoxShadow(blur_radius=12, color="#00000018", offset=ft.Offset(0, 3)),
     )
+
+    # ── Priority Tasks Section ────────────────────────────────
+    active_tasks = [t for t in tasks if t.status not in ("done", "cancelled")]
+    overdue_t = [t for t in active_tasks if t.is_overdue]
+    today_task_list = [t for t in active_tasks
+                       if t.due_date == today_str and not t.is_overdue]
+    upcoming_t = sorted(
+        [t for t in active_tasks if t.due_date and t.due_date > today_str],
+        key=lambda t: (t.due_date, {"high": 0, "medium": 1, "low": 2}.get(t.priority, 1))
+    )
+    priority_tasks = (overdue_t + today_task_list + upcoming_t)[:6]
+
+    def _pri_task_row(t: Task):
+        is_overdue = t.is_overdue
+        pri_color = {"high": Colors.ERROR, "medium": Colors.WARNING, "low": Colors.PRIMARY}.get(
+            t.priority, Colors.PRIMARY)
+        date_color = Colors.ERROR if is_overdue else Colors.TEXT_MUTED
+        return ft.Container(
+            content=ft.Row([
+                ft.Container(
+                    width=3, height=None,
+                    border_radius=Radius.FULL,
+                    bgcolor=Colors.ERROR if is_overdue else pri_color,
+                    expand_loose=True,
+                ),
+                ft.Container(width=8),
+                ft.Column([
+                    ft.Text(t.title, size=Typography.SMALL, color=Colors.TEXT_PRIMARY,
+                            weight=Typography.MEDIUM, max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS),
+                    ft.Row([
+                        ft.Text("⚠️" if is_overdue else "📅", size=10),
+                        ft.Text(t.due_date_display, size=Typography.TINY, color=date_color),
+                        ft.Text("·", size=Typography.TINY, color=Colors.TEXT_MUTED),
+                        ft.Text(t.category, size=Typography.TINY, color=Colors.TEXT_MUTED),
+                    ], spacing=4, tight=True),
+                ], expand=True, spacing=2, tight=True),
+                ft.GestureDetector(
+                    content=ft.Icon(
+                        ft.Icons.CHECK_CIRCLE if t.status == "done"
+                        else ft.Icons.RADIO_BUTTON_UNCHECKED,
+                        size=20,
+                        color=Colors.SUCCESS if t.status == "done" else Colors.TEXT_MUTED,
+                    ),
+                    on_tap=lambda _, tt=t: [
+                        TaskService.toggle_done(tt), on_navigate("dashboard")
+                    ],
+                ),
+            ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            padding=ft.padding.symmetric(vertical=8, horizontal=10),
+            border_radius=Radius.MD,
+            bgcolor=f"#10{Colors.ERROR[1:]}" if is_overdue else Colors.BG_CARD,
+            border=ft.Border.all(1, f"#30{Colors.ERROR[1:]}" if is_overdue else Colors.BORDER),
+            margin=ft.margin.only(bottom=Spacing.XS),
+            on_click=lambda _, tt=t: on_navigate("task_edit", task=tt),
+            ink=True,
+        )
+
+    priority_section = ft.Column([
+        section_header("🎯 Việc nên ưu tiên hôm nay",
+                       f"{len(overdue_t)} quá hạn · {len(today_task_list)} hôm nay",
+                       "Tất cả", lambda _: on_navigate("tasks")),
+        ft.Container(height=Spacing.SM),
+        *(([_pri_task_row(t) for t in priority_tasks]) if priority_tasks else
+          [ft.Container(
+              content=ft.Text("🎉 Không có việc ưu tiên!", size=Typography.BODY,
+                              color=Colors.TEXT_MUTED, text_align=ft.TextAlign.CENTER),
+              padding=ft.padding.symmetric(vertical=Spacing.MD),
+          )]),
+    ], spacing=0, tight=True)
 
     # ── Assemble ──────────────────────────────────────────────
     main_items = [
@@ -369,6 +476,8 @@ def build_dashboard(page: ft.Page, user, on_navigate):
                 ft.Container(height=Spacing.SM),
                 ai_insights_card,
                 *([] if not advice_banner else [ft.Container(height=Spacing.SM), advice_banner]),
+                ft.Container(height=Spacing.LG),
+                priority_section,
                 ft.Container(height=Spacing.LG),
                 quick_actions,
                 ft.Container(height=Spacing.LG),
@@ -485,6 +594,8 @@ def _build_checkin_card(page: ft.Page, user) -> ft.Container | None:
         shadow=ft.BoxShadow(blur_radius=12, color=Colors.PRIMARY_SHADOW,
                             offset=ft.Offset(0, 3)),
     )
+
+
 
 
 def _insight_chip(icon: str, label: str, value: str, color: str) -> ft.Container:

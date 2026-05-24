@@ -6,7 +6,7 @@ import flet as ft
 import uuid
 from datetime import datetime
 from core.theme import Colors, Typography, Spacing, Radius
-from core.models import Project
+from core.models import Project, Task
 from core.services import ProjectService, TaskService
 from components.widgets import primary_button, snack
 
@@ -59,7 +59,7 @@ def build_projects_screen(page: ft.Page, user, on_navigate):
         return ft.GestureDetector(
             content=ft.Container(
                 width=28, height=28, border_radius=14, bgcolor=c,
-                border=ft.border.all(3, Colors.TEXT_PRIMARY if sel else "transparent"),
+                border=ft.Border.all(3, Colors.TEXT_PRIMARY if sel else "transparent"),
             ),
             on_tap=lambda _, col=c: _pick_color(col),
         )
@@ -363,7 +363,7 @@ def build_projects_screen(page: ft.Page, user, on_navigate):
                 new_title_tf.error_text = None
                 due = new_due_tf.value.strip() or None
                 now_str = datetime.now().isoformat()
-                new_task = __import__("core.models", fromlist=["Task"]).Task(
+                new_task = Task(
                     id=str(uuid.uuid4()),
                     user_id=user.id,
                     title=title,

@@ -317,7 +317,8 @@ class SchedulingEngine:
         work_end   = ctx.get("work_end_hour", 22)
         return [
             s for s in slots
-            if work_start <= s.get("suggested_hour", 12) <= work_end
+            if s.get("task") is not None           # skip break slots
+            and work_start <= s.get("suggested_hour", 12) <= work_end
         ]
 
     @classmethod

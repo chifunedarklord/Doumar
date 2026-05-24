@@ -161,7 +161,7 @@ def build_calendar_screen(page: ft.Page, user, on_navigate):
                 padding=ft.Padding.symmetric(vertical=Spacing.SM, horizontal=Spacing.SM),
                 border_radius=Radius.MD,
                 bgcolor=Colors.BG_CARD,
-                border=ft.border.all(1, Colors.BORDER),
+                border=ft.Border.all(1, Colors.BORDER),
                 margin=ft.Margin.only(bottom=Spacing.SM),
                 shadow=ft.BoxShadow(
                     blur_radius=8,
@@ -214,7 +214,7 @@ def build_calendar_screen(page: ft.Page, user, on_navigate):
                 margin=ft.margin.symmetric(horizontal=Spacing.MD),
                 border_radius=Radius.LG,
                 bgcolor=Colors.BG_CARD,
-                border=ft.border.all(1, Colors.BORDER),
+                border=ft.Border.all(1, Colors.BORDER),
                 shadow=ft.BoxShadow(blur_radius=12, color="#00000015",
                                     offset=ft.Offset(0, 4)),
             ),

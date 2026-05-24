@@ -4,4 +4,6 @@ pytesseract
 Pillow
 plyer
 sqlalchemy>=2.0.0
+pyodbc
+python-dotenv
 bcrypt

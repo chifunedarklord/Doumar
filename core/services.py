@@ -2,6 +2,7 @@
 TaskFlow - Services Layer (Upgraded)
 Tích hợp toàn bộ intelligence engines vào business logic.
 """
+import logging
 import bcrypt
 import uuid
 from datetime import datetime, date
@@ -9,6 +10,8 @@ from typing import Optional, List
 
 from core.models import User, Task, WorkSession, BehaviorEvent
 from core.database import Storage
+
+logger = logging.getLogger(__name__)
 
 
 # ─── Auth Service ─────────────────────────────────────────────────────────────
@@ -148,9 +151,22 @@ class TaskService:
             }
             task.ai_priority_score = AdaptivePriorityEngine.calculate_score(task, ctx)
         except Exception:
-            pass
+            logger.exception("AdaptivePriorityEngine failed for task %s", task.id)
 
-        Storage.save_task(task)
+        is_new = Storage.save_task(task)
+
+        # Log task creation behavior so AI can learn from it
+        if is_new:
+            try:
+                BehaviorService.log(task.user_id, "task_create", {
+                    "task_id": task.id,
+                    "title": task.title,
+                    "category": task.category,
+                    "priority": task.priority,
+                    "estimated_minutes": task.estimated_minutes,
+                })
+            except Exception:
+                pass
 
         # Publish event + invalidate AI context cache
         try:
@@ -171,8 +187,13 @@ class TaskService:
             pass
 
     @staticmethod
-    def delete_task(task_id: str):
+    def delete_task(task_id: str, user_id: str = None):
         Storage.delete_task(task_id)
+        if user_id:
+            try:
+                AnalyticsService.invalidate_cache(user_id)
+            except Exception:
+                pass
 
     @staticmethod
     def toggle_done(task: Task) -> Task:
@@ -196,6 +217,10 @@ class TaskService:
         else:
             task.completed_at = None
         Storage.save_task(task)
+        try:
+            AnalyticsService.invalidate_cache(task.user_id)
+        except Exception:
+            pass
         return task
 
     @staticmethod
@@ -287,7 +312,7 @@ class BehaviorService:
         try:
             Storage.log_behavior(user_id, event_type, event_data or {})
         except Exception:
-            pass
+            logger.exception("BehaviorService.log failed: user=%s event=%s", user_id, event_type)
 
     @staticmethod
     def get_events(user_id: str, event_type: str = None, limit: int = 300) -> list:
@@ -573,8 +598,8 @@ class AIMemoryService:
             events = Storage.get_behavior_events(user_id, limit=300)
             sessions = Storage.get_work_sessions(user_id, limit=100)
             MemoryEngine.update_from_behavior(user_id, tasks, events, sessions)
-        except Exception as e:
-            print(f"[AIMemoryService] Error updating: {e}")
+        except Exception:
+            logger.exception("AIMemoryService.update_from_behavior failed: user=%s", user_id)
 
     @staticmethod
     def get_context_summary(user_id: str) -> str:

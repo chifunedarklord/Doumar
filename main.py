@@ -3,11 +3,22 @@ TaskFlow - Main Application Entry Point
 """
 import sys
 import os
+import logging
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 sys.path.insert(0, os.path.dirname(__file__))
 
 import flet as ft
 from core.theme import Colors, Typography, Spacing, Radius
 from core.services import AuthService
+
+try:
+    from core.orm import DB_BACKEND
+    print(f"[TaskFlow] DB Backend: {DB_BACKEND.upper()}")
+except Exception:
+    pass
 
 
 def main(page: ft.Page):
