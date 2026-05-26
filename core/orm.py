@@ -1,12 +1,10 @@
 """
 TaskFlow - SQLAlchemy ORM Definitions
-Ưu tiên SQL Server (pyodbc). Tự fallback về SQLite nếu pyodbc chưa cài
-hoặc SQL Server không kết nối được.
+Kết nối SQL Server (pyodbc). Yêu cầu cấu hình DB_SERVER trong .env.
 """
 import os
 import logging
 from datetime import datetime
-from pathlib import Path
 from typing import Optional, List
 from sqlalchemy import String, Integer, Float, Boolean, Text, ForeignKey, create_engine, JSON, Unicode, UnicodeText
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
@@ -20,14 +18,8 @@ except ImportError:
     pass
 
 
-def _sqlite_fallback_url() -> str:
-    data_dir = Path(__file__).parent.parent / "data"
-    data_dir.mkdir(exist_ok=True)
-    return f"sqlite:///{data_dir / 'taskflow_v2.db'}"
-
-
-def _build_mssql_odbc_connect() -> str | None:
-    """Trả về chuỗi odbc_connect cho SQL Server, hoặc None nếu chưa cấu hình."""
+def _build_mssql_odbc_connect() -> str:
+    """Trả về chuỗi odbc_connect cho SQL Server. Raise nếu chưa cấu hình."""
     server   = os.environ.get("DB_SERVER", "").strip()
     database = os.environ.get("DB_NAME", "taskflow").strip()
     username = os.environ.get("DB_USERNAME", "").strip()
@@ -35,7 +27,10 @@ def _build_mssql_odbc_connect() -> str | None:
     driver   = os.environ.get("DB_DRIVER", "ODBC Driver 17 for SQL Server").strip()
 
     if not server:
-        return None
+        raise RuntimeError(
+            "[TaskFlow] DB_SERVER chưa được cấu hình.\n"
+            "Tạo file .env từ .env.example và điền DB_SERVER."
+        )
 
     parts = [
         f"DRIVER={{{driver}}}",
@@ -51,51 +46,40 @@ def _build_mssql_odbc_connect() -> str | None:
     return ";".join(parts) + ";"
 
 
-def _create_engine_with_fallback():
+def _create_engine_mssql():
     from urllib.parse import quote_plus
 
-    explicit_url = os.environ.get("DATABASE_URL", "")
+    explicit_url = os.environ.get("DATABASE_URL", "").strip()
     if explicit_url:
-        odbc_connect = None
-        mssql_url = explicit_url
+        connect_url = explicit_url
     else:
         odbc_connect = _build_mssql_odbc_connect()
-        mssql_url = None
+        connect_url = f"mssql+pyodbc:///?odbc_connect={quote_plus(odbc_connect)}"
 
-    if odbc_connect or mssql_url:
-        try:
-            import pyodbc  # noqa: F401
-            if odbc_connect:
-                connect_url = f"mssql+pyodbc:///?odbc_connect={quote_plus(odbc_connect)}"
-            else:
-                connect_url = mssql_url
-            eng = create_engine(
-                connect_url,
-                echo=False,
-                pool_pre_ping=True,
-                connect_args={"fast_executemany": True},
-            )
-            # Kiểm tra kết nối thực sự
-            with eng.connect():
-                pass
-            server_hint = os.environ.get("DB_SERVER", "")
-            print(f"[TaskFlow] Connected to SQL Server: {server_hint}/{os.environ.get('DB_NAME','taskflow')}")
-            logger.info("Connected to SQL Server.")
-            return eng, "mssql"
-        except ModuleNotFoundError:
-            print("[TaskFlow] pyodbc chưa được cài. Chạy: pip install pyodbc")
-            logger.warning("pyodbc not installed.")
-        except Exception as e:
-            print(f"[TaskFlow] SQL Server connection FAILED: {e}")
-            logger.warning("SQL Server connection failed: %s", e)
+    try:
+        import pyodbc  # noqa: F401
+    except ModuleNotFoundError:
+        raise RuntimeError(
+            "[TaskFlow] pyodbc chưa được cài. Chạy: pip install pyodbc"
+        )
 
-    sqlite_url = _sqlite_fallback_url()
-    logger.info("Using SQLite: %s", sqlite_url)
-    eng = create_engine(sqlite_url, echo=False, pool_pre_ping=True)
-    return eng, "sqlite"
+    eng = create_engine(
+        connect_url,
+        echo=False,
+        pool_pre_ping=True,
+        connect_args={"fast_executemany": True},
+    )
+    with eng.connect():
+        pass
+
+    server_hint = os.environ.get("DB_SERVER", "")
+    print(f"[TaskFlow] Connected to SQL Server: {server_hint}/{os.environ.get('DB_NAME', 'taskflow')}")
+    logger.info("Connected to SQL Server.")
+    return eng
 
 
-engine, DB_BACKEND = _create_engine_with_fallback()
+engine = _create_engine_mssql()
+DB_BACKEND = "mssql"
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 class Base(DeclarativeBase):

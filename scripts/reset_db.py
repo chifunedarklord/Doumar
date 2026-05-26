@@ -8,12 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from dotenv import load_dotenv
 load_dotenv()
 
-from core.orm import engine, Base, DB_BACKEND
-
-print(f"Backend: {DB_BACKEND}")
-if DB_BACKEND != "mssql":
-    print("Not connected to SQL Server — exiting.")
-    sys.exit(1)
+from core.orm import engine, Base
 
 confirm = input("Drop and recreate ALL tables? This deletes all data. (yes/no): ").strip()
 if confirm != "yes":
