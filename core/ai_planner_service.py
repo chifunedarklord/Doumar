@@ -211,10 +211,11 @@ DỮ LIỆU NGƯỜI DÙNG (từ SQL Server):
 # ── Main API call ─────────────────────────────────────────────────────────────
 
 def get_plan_response(message: str, user_id: str,
-                      last_plan: dict = None) -> dict:
+                      last_plan: dict = None, image_path: str = None) -> dict:
     """
     Call Gemini for a structured planning response.
     Returns dict with 'type' key: plan_result | normal_chat | task_create.
+    Supports optional image_path for image analysis.
     Never raises — always returns a valid dict.
     """
     try:
@@ -255,10 +256,24 @@ def get_plan_response(message: str, user_id: str,
         import time as _time
 
         client = genai.Client(api_key=_API_KEY)
-        contents = [types.Content(
-            role="user",
-            parts=[types.Part.from_text(text=user_content)],
-        )]
+
+        # Build parts: image first (if provided), then text
+        parts = []
+        if image_path:
+            try:
+                with open(image_path, "rb") as f:
+                    img_data = f.read()
+                ext = image_path.rsplit(".", 1)[-1].lower()
+                mime_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg",
+                            "png": "image/png", "webp": "image/webp",
+                            "gif": "image/gif", "bmp": "image/bmp"}
+                mime = mime_map.get(ext, "image/jpeg")
+                parts.append(types.Part.from_bytes(data=img_data, mime_type=mime))
+            except Exception:
+                logger.warning("Failed to load image for plan response: %s", image_path)
+
+        parts.append(types.Part.from_text(text=user_content))
+        contents = [types.Content(role="user", parts=parts)]
 
         last_err = None
         for model in _MODEL_CHAIN:

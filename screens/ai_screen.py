@@ -10,15 +10,17 @@ from datetime import datetime
 
 from core.theme import Colors, Typography, Spacing, Radius
 from components.widgets import snack
+from core.i18n import t, get_lang, tts_code, stt_code, ai_lang_instruction
 
 logger = logging.getLogger(__name__)
 
-_QUICK_PROMPTS = [
-    ("📊", "Phân tích",   "Phân tích tình trạng công việc của tôi"),
-    ("📋", "Kế hoạch",   "Lên kế hoạch làm đồ án OpenGL trong 5 ngày"),
-    ("🎯", "Ưu tiên",    "Task nào tôi nên tập trung làm trước?"),
-    ("✈️", "Đi chơi",    "Lên kế hoạch ngày mai đi chơi"),
-]
+def _get_quick_prompts():
+    return [
+        ("📊", t("quick_analyze"),  t("quick_analyze_prompt")),
+        ("📋", t("quick_plan"),     t("quick_plan_prompt")),
+        ("🎯", t("quick_priority"), t("quick_priority_prompt")),
+        ("✈️", t("quick_leisure"),  t("quick_leisure_prompt")),
+    ]
 
 
 # ── Plan card renderer ────────────────────────────────────────────────────────
@@ -72,7 +74,7 @@ def _render_plan_card(plan: dict, on_save_tasks, on_refine) -> ft.Container:
                 content=ft.Column([
                     ft.Row([
                         ft.Icon(ft.Icons.LIGHTBULB_OUTLINE_ROUNDED, size=12, color=Colors.WARNING),
-                        ft.Text("Giả định:", size=Typography.TINY,
+                        ft.Text(t("assumptions_label"), size=Typography.TINY,
                                 color=Colors.WARNING, weight=Typography.SEMIBOLD),
                     ], spacing=4),
                     *[ft.Text(f"• {a}", size=Typography.TINY, color=Colors.TEXT_MUTED)
@@ -121,21 +123,56 @@ def _render_plan_card(plan: dict, on_save_tasks, on_refine) -> ft.Container:
     plan_section = ft.Column([
         ft.Row([
             ft.Icon(ft.Icons.CALENDAR_TODAY_ROUNDED, size=13, color=Colors.PRIMARY),
-            ft.Text("Kế hoạch chi tiết:", size=Typography.SMALL,
+            ft.Text(t("plan_detail_label"), size=Typography.SMALL,
                     color=Colors.TEXT_PRIMARY, weight=Typography.SEMIBOLD),
         ], spacing=4),
         ft.Column([_step_row(s) for s in steps[:6]], spacing=0, tight=True),
     ], spacing=6, tight=True) if steps else ft.Container(height=0)
 
     # ── Suggested tasks ─────────────────────────────────────────
-    task_checks = {t.get("title", ""): {"v": True} for t in tasks}
+    task_checks = {td.get("title", ""): {"v": True} for td in tasks}
+    tasks_content_ref = ft.Ref[ft.Column]()
 
-    def _task_row(t: dict) -> ft.Row:
-        title_t = t.get("title", "")
-        pri     = t.get("priority", "medium")
+    def _checked_count():
+        return sum(1 for s in task_checks.values() if s["v"])
+
+    def _save_one_task(td: dict):
+        from core.models import Task as _Task
+        from core.services import TaskService as _TS
+        try:
+            now_str = datetime.now().isoformat()
+            new_t = _Task(
+                id=str(uuid.uuid4()),
+                user_id=_current_user_id[0],
+                title=td.get("title", "Task"),
+                description=td.get("description", ""),
+                category=td.get("category", "personal"),
+                priority=td.get("priority", "medium"),
+                status="todo",
+                due_date=td.get("due_date"),
+                due_time=td.get("due_time"),
+                estimated_minutes=int(td.get("estimated_minutes") or 30),
+                created_at=now_str,
+                updated_at=now_str,
+            )
+            _TS.save_task(new_t)
+            snack(_current_page[0], t("saved_short", title=new_t.title[:30]))
+            # Navigate to tasks screen
+            try:
+                if _current_navigate[0]:
+                    _current_navigate[0]("tasks")
+            except Exception:
+                pass
+        except Exception:
+            logger.exception("Failed to save single task: %s", td.get("title"))
+            snack(_current_page[0], t("save_error"))
+
+    def _task_row(td: dict) -> ft.Container:
+        title_t = td.get("title", "")
+        pri     = td.get("priority", "medium")
         pri_color = {"high": Colors.ERROR, "medium": Colors.WARNING,
                      "low": Colors.PRIMARY}.get(pri, Colors.PRIMARY)
-        est     = t.get("estimated_minutes", 30)
+        est     = td.get("estimated_minutes", 30)
         check_ref = ft.Ref[ft.Container]()
         state = task_checks.get(title_t, {"v": True})
 
@@ -147,49 +184,71 @@ def _render_plan_card(plan: dict, on_save_tasks, on_refine) -> ft.Container:
                     1, Colors.SUCCESS if s["v"] else Colors.TEXT_MUTED)
                 if ref.current.content:
                     ref.current.content.color = "white" if s["v"] else Colors.TEXT_MUTED
+            cnt = _checked_count()
+            if _save_count_label.current:
+                _save_count_label.current.value = t("save_all_tasks", n=cnt)
+            try:
+                _current_page[0].update()
+            except Exception:
+                pass
 
-        return ft.GestureDetector(
-            on_tap=_toggle,
+        return ft.Container(
             content=ft.Row([
-                ft.Container(
-                    ref=check_ref,
-                    content=ft.Icon(ft.Icons.CHECK, size=10, color="white"),
-                    width=18, height=18, border_radius=4,
-                    bgcolor=Colors.SUCCESS,
-                    border=ft.Border.all(1, Colors.SUCCESS),
-                    alignment=ft.Alignment.CENTER,
+                ft.GestureDetector(
+                    on_tap=_toggle,
+                    content=ft.Container(
+                        ref=check_ref,
+                        content=ft.Icon(ft.Icons.CHECK, size=10, color="white"),
+                        width=18, height=18, border_radius=4,
+                        bgcolor=Colors.SUCCESS,
+                        border=ft.Border.all(1, Colors.SUCCESS),
+                        alignment=ft.Alignment.CENTER,
+                    ),
                 ),
                 ft.Column([
                     ft.Text(title_t, size=Typography.TINY, color=Colors.TEXT_PRIMARY,
                             max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, expand=True),
-                    ft.Text(f"{est} phút", size=8, color=Colors.TEXT_MUTED),
+                    ft.Text(f"{est} {t('minutes_short')}", size=8, color=Colors.TEXT_MUTED),
                 ], spacing=0, tight=True, expand=True),
                 ft.Container(
                     width=5, height=5, border_radius=3, bgcolor=pri_color,
                 ),
+                # Per-task save button
+                ft.GestureDetector(
+                    on_tap=lambda _, task_data=td: _save_one_task(task_data),
+                    content=ft.Container(
+                        content=ft.Text(t("save_btn_short"), size=8, color=Colors.PRIMARY,
+                                        weight=Typography.BOLD),
+                        padding=ft.padding.symmetric(horizontal=7, vertical=3),
+                        border_radius=Radius.FULL,
+                        bgcolor=Colors.PRIMARY_BG,
+                        border=ft.Border.all(1, Colors.PRIMARY_BORDER),
+                    ),
+                ),
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            margin=ft.margin.only(bottom=2),
         )
 
     def _save_tasks(_):
         from core.models import Task as _Task
         from core.services import TaskService as _TS, BehaviorService as _BS
         saved = 0
-        for t in tasks:
-            title_t = t.get("title", "")
+        for td in tasks:
+            title_t = td.get("title", "")
             if task_checks.get(title_t, {"v": True})["v"]:
                 try:
                     now_str = datetime.now().isoformat()
                     new_t = _Task(
                         id=str(uuid.uuid4()),
-                        user_id="",  # filled below
+                        user_id="",
                         title=title_t,
-                        description=t.get("description", ""),
-                        category=t.get("category", "personal"),
-                        priority=t.get("priority", "medium"),
+                        description=td.get("description", ""),
+                        category=td.get("category", "personal"),
+                        priority=td.get("priority", "medium"),
                         status="todo",
-                        due_date=t.get("due_date"),
-                        due_time=t.get("due_time"),
-                        estimated_minutes=int(t.get("estimated_minutes") or 30),
+                        due_date=td.get("due_date"),
+                        due_time=td.get("due_time"),
+                        estimated_minutes=int(td.get("estimated_minutes") or 30),
                         created_at=now_str,
                         updated_at=now_str,
                     )
@@ -198,19 +257,53 @@ def _render_plan_card(plan: dict, on_save_tasks, on_refine) -> ft.Container:
                     saved += 1
                 except Exception:
                     logger.exception("Failed to save task: %s", title_t)
-        snack(_current_page[0], f"✓ Đã lưu {saved} task vào danh sách!")
         try:
             _BS.log(_current_user_id[0], "plan_save_tasks", {"task_count": saved})
         except Exception:
             pass
+        # Replace task list with success UI in-place
+        _current_plan_data[0] = None
+        if tasks_content_ref.current:
+            tasks_content_ref.current.controls = [
+                ft.Container(
+                    content=ft.Column([
+                        ft.Row([
+                            ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, size=16, color=Colors.SUCCESS),
+                            ft.Text(t("tasks_saved_ok", n=saved),
+                                    size=Typography.SMALL, color=Colors.SUCCESS,
+                                    weight=Typography.SEMIBOLD),
+                        ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                        ft.Container(
+                            content=ft.Row([
+                                ft.Icon(ft.Icons.CHECKLIST_ROUNDED, size=14, color=Colors.PRIMARY),
+                                ft.Text(t("view_tasks"), size=Typography.TINY,
+                                        color=Colors.PRIMARY, weight=Typography.SEMIBOLD),
+                            ], spacing=6, alignment=ft.MainAxisAlignment.CENTER),
+                            height=34, border_radius=Radius.MD,
+                            bgcolor=Colors.PRIMARY_BG,
+                            border=ft.Border.all(1, Colors.PRIMARY_BORDER),
+                            alignment=ft.Alignment.CENTER,
+                            on_click=lambda _: _current_navigate[0]("tasks") if _current_navigate[0] else None,
+                            ink=True,
+                            margin=ft.margin.only(top=4),
+                        ),
+                    ], spacing=6, tight=True),
+                    padding=ft.padding.symmetric(vertical=6, horizontal=2),
+                ),
+            ]
+            try:
+                _current_page[0].update()
+            except Exception:
+                pass
 
+    _save_count_label = ft.Ref[ft.Text]()
     tasks_section = ft.Container(height=0)
     if tasks:
         save_btn = ft.Container(
             content=ft.Row([
                 ft.Icon(ft.Icons.SAVE_OUTLINED, size=14, color="white"),
-                ft.Text(f"Lưu {len(tasks)} task được chọn", size=Typography.TINY,
-                        color="white", weight=Typography.SEMIBOLD),
+                ft.Text(t("save_all_tasks", n=len(tasks)), ref=_save_count_label,
+                        size=Typography.TINY, color="white", weight=Typography.SEMIBOLD),
             ], spacing=6, alignment=ft.MainAxisAlignment.CENTER),
             height=36, border_radius=Radius.MD,
             bgcolor=Colors.SUCCESS,
@@ -221,12 +314,12 @@ def _render_plan_card(plan: dict, on_save_tasks, on_refine) -> ft.Container:
         tasks_section = ft.Column([
             ft.Row([
                 ft.Icon(ft.Icons.CHECKLIST_ROUNDED, size=13, color=Colors.SUCCESS),
-                ft.Text(f"{len(tasks)} task đề xuất:", size=Typography.SMALL,
+                ft.Text(t("tasks_suggested", n=len(tasks)), size=Typography.SMALL,
                         color=Colors.TEXT_PRIMARY, weight=Typography.SEMIBOLD),
             ], spacing=4),
-            ft.Column([_task_row(t) for t in tasks[:6]], spacing=4, tight=True),
+            ft.Column([_task_row(td) for td in tasks[:6]], spacing=4, tight=True),
             save_btn,
-        ], spacing=6, tight=True)
+        ], spacing=6, tight=True, ref=tasks_content_ref)
 
     # ── Refine section ──────────────────────────────────────────
     def _refine_chip(opt: str) -> ft.GestureDetector:
@@ -273,7 +366,7 @@ def _render_plan_card(plan: dict, on_save_tasks, on_refine) -> ft.Container:
                 content=ft.Column([
                     ft.Row([
                         ft.Icon(ft.Icons.AUTO_AWESOME_ROUNDED, size=10, color=Colors.PRIMARY),
-                        ft.Text("Đã cá nhân hóa theo:", size=Typography.TINY,
+                        ft.Text(t("personalized_by"), size=Typography.TINY,
                                 color=Colors.PRIMARY, weight=Typography.SEMIBOLD),
                     ], spacing=3),
                     ft.Row(chips, spacing=4, wrap=True),
@@ -311,15 +404,18 @@ def _render_plan_card(plan: dict, on_save_tasks, on_refine) -> ft.Container:
 
 # ── Main screen builder ───────────────────────────────────────────────────────
 
-_current_page    = [None]   # module-level refs for save task callbacks
-_current_user_id = [""]
+_current_page     = [None]   # module-level refs for save task callbacks
+_current_user_id  = [""]
+_current_navigate = [None]
+_current_plan_data = [None]  # persists last plan across navigation
 
 
 def build_ai_screen(page: ft.Page, user, on_navigate):
     from core.services import TaskService, ChatService
 
-    _current_page[0]    = page
-    _current_user_id[0] = user.id
+    _current_page[0]     = page
+    _current_user_id[0]  = user.id
+    _current_navigate[0] = on_navigate
 
     tasks   = TaskService.get_tasks(user.id)
     total   = len(tasks)
@@ -340,6 +436,83 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         padding=ft.Padding.symmetric(horizontal=Spacing.MD, vertical=Spacing.MD),
         auto_scroll=True,
     )
+
+    # ── TTS helper (language-aware, gTTS → pygame → PowerShell) ─
+    def _speak_text(text: str):
+        lang_code = tts_code()   # "vi" / "en" / "zh-CN"
+        def _run():
+            import os as _os, tempfile as _tmp
+            tmp_path = None
+            try:
+                from gtts import gTTS
+                tts = gTTS(text=text[:600], lang=lang_code, slow=False)
+                fd, tmp_path = _tmp.mkstemp(suffix=".mp3")
+                _os.close(fd)
+                tts.save(tmp_path)
+                # Try pygame first
+                try:
+                    import pygame
+                    pygame.mixer.init()
+                    pygame.mixer.music.load(tmp_path)
+                    pygame.mixer.music.play()
+                    import time
+                    while pygame.mixer.music.get_busy():
+                        time.sleep(0.05)
+                    pygame.mixer.music.unload()
+                    return
+                except Exception:
+                    pass
+                # Fallback: PowerShell Windows Media Player COM
+                try:
+                    import subprocess
+                    safe = tmp_path.replace("\\", "/")
+                    subprocess.run(
+                        ["powershell", "-NoProfile", "-Command",
+                         f'$p=New-Object -ComObject WMPlayer.OCX.7;'
+                         f'$p.URL="{safe}";$p.controls.play();'
+                         f'Start-Sleep -Seconds 30;$p.controls.stop()'],
+                        timeout=35, creationflags=subprocess.CREATE_NO_WINDOW,
+                    )
+                except Exception:
+                    pass
+            except ImportError:
+                # gTTS not installed — fall back to pyttsx3 / SAPI
+                try:
+                    import pyttsx3
+                    engine = pyttsx3.init()
+                    engine.setProperty("rate", 155)
+                    for v in engine.getProperty("voices"):
+                        id_name = (v.id + v.name).lower()
+                        if lang_code == "vi" and any(k in id_name for k in ("vi", "viet")):
+                            engine.setProperty("voice", v.id); break
+                        elif lang_code == "en" and "en" in id_name:
+                            engine.setProperty("voice", v.id); break
+                        elif lang_code.startswith("zh") and any(k in id_name for k in ("zh", "chin")):
+                            engine.setProperty("voice", v.id); break
+                    engine.say(text[:600])
+                    engine.runAndWait()
+                except ImportError:
+                    try:
+                        import subprocess, re
+                        clean = re.sub(r'[\"\'\\]', "", text[:400]).replace("\n", " ")
+                        subprocess.run(
+                            ["powershell", "-NoProfile", "-Command",
+                             f'Add-Type -AssemblyName System.Speech;'
+                             f'$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;'
+                             f'$s.Rate=1;$s.Speak("{clean}")'],
+                            timeout=40, creationflags=subprocess.CREATE_NO_WINDOW,
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            finally:
+                if tmp_path:
+                    try:
+                        _os.unlink(tmp_path)
+                    except Exception:
+                        pass
+        threading.Thread(target=_run, daemon=True).start()
 
     # ── Bubble helper ──────────────────────────────────────────
     def _bubble(text: str, is_user: bool = False, animate: bool = True) -> ft.Row:
@@ -372,10 +545,82 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
                            ft.Column([bubble], expand=4,
                                      horizontal_alignment=ft.CrossAxisAlignment.END)],
                           spacing=0)
+        speak_btn = ft.GestureDetector(
+            on_tap=lambda _, tx=text: _speak_text(tx),
+            content=ft.Container(
+                content=ft.Row([
+                    ft.Icon(ft.Icons.VOLUME_UP_OUTLINED, size=12, color=Colors.TEXT_MUTED),
+                    ft.Text(t("listen"), size=8, color=Colors.TEXT_MUTED),
+                ], spacing=3, tight=True),
+                padding=ft.padding.symmetric(horizontal=8, vertical=3),
+                border_radius=Radius.FULL,
+                border=ft.Border.all(1, Colors.BORDER),
+                margin=ft.margin.only(top=3),
+            ),
+        )
         return ft.Row([ai_avatar,
-                       ft.Column([bubble], expand=True,
+                       ft.Column([bubble, speak_btn], expand=True,
                                  horizontal_alignment=ft.CrossAxisAlignment.START)],
                       spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.START)
+
+    def _bubble_voice(text: str) -> ft.Row:
+        """User-side voice message bubble (purple, with mic icon)."""
+        bubble = ft.Container(
+            content=ft.Column([
+                ft.Row([
+                    ft.Icon(ft.Icons.MIC_ROUNDED, size=11, color="rgba(255,255,255,0.8)"),
+                    ft.Text(t("voice_label"), size=8,
+                            color="rgba(255,255,255,0.7)", weight=Typography.SEMIBOLD),
+                ], spacing=4, tight=True),
+                ft.Text(text, size=Typography.BODY, color="white", selectable=True),
+            ], spacing=3, tight=True),
+            padding=ft.Padding.symmetric(horizontal=14, vertical=10),
+            border_radius=ft.BorderRadius(top_left=16, top_right=16,
+                                          bottom_right=4, bottom_left=16),
+            bgcolor=Colors.VIOLET,
+            shadow=ft.BoxShadow(blur_radius=8, color="#00000020", offset=ft.Offset(0, 2)),
+        )
+        return ft.Row(
+            [ft.Container(expand=1),
+             ft.Column([bubble], expand=4, horizontal_alignment=ft.CrossAxisAlignment.END)],
+            spacing=0,
+        )
+
+    def _bubble_file(fname: str, is_image: bool = False) -> ft.Row:
+        """User-side file/image bubble (teal, with file icon)."""
+        icon = ft.Icons.IMAGE_ROUNDED if is_image else ft.Icons.DESCRIPTION_ROUNDED
+        accent = "#06B6D4"   # cyan-500
+        accent_bg = "#0E7490"
+        bubble = ft.Container(
+            content=ft.Column([
+                ft.Row([
+                    ft.Icon(icon, size=13, color="rgba(255,255,255,0.85)"),
+                    ft.Text(
+                        "Ảnh" if is_image else "File",
+                        size=8,
+                        color="rgba(255,255,255,0.7)",
+                        weight=Typography.SEMIBOLD,
+                    ),
+                ], spacing=4, tight=True),
+                ft.Text(fname, size=Typography.BODY, color="white",
+                        selectable=True, max_lines=2,
+                        overflow=ft.TextOverflow.ELLIPSIS),
+            ], spacing=3, tight=True),
+            padding=ft.Padding.symmetric(horizontal=14, vertical=10),
+            border_radius=ft.BorderRadius(top_left=16, top_right=16,
+                                          bottom_right=4, bottom_left=16),
+            gradient=ft.LinearGradient(
+                colors=[accent, accent_bg],
+                begin=ft.Alignment.TOP_LEFT,
+                end=ft.Alignment.BOTTOM_RIGHT,
+            ),
+            shadow=ft.BoxShadow(blur_radius=8, color="#00000020", offset=ft.Offset(0, 2)),
+        )
+        return ft.Row(
+            [ft.Container(expand=1),
+             ft.Column([bubble], expand=4, horizontal_alignment=ft.CrossAxisAlignment.END)],
+            spacing=0,
+        )
 
     def _plan_row(plan_data: dict) -> ft.Row:
         """Wrap plan card in the AI-side row layout."""
@@ -454,7 +699,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
 
     # ── Input bar ──────────────────────────────────────────────
     tf = ft.TextField(
-        hint_text="Nhắn gì đó, hoặc 'Lên kế hoạch...'",
+        hint_text=t("ai_typing"),
         hint_style=ft.TextStyle(color=Colors.TEXT_MUTED),
         bgcolor=Colors.BG_INPUT,
         border_color=Colors.BORDER,
@@ -481,23 +726,507 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
                 root.withdraw()
                 file_path = filedialog.askopenfilename(
                     title="Chọn ảnh",
-                    filetypes=[("Image files", "*.jpg;*.jpeg;*.png;*.bmp")]
+                    filetypes=[("Image files", "*.jpg;*.jpeg;*.png;*.bmp;*.webp")]
                 )
                 root.destroy()
             except Exception:
                 file_path = None
-            tf.hint_text = "Nhắn gì đó, hoặc 'Lên kế hoạch...'"
+            tf.hint_text = t("ai_typing")
             tf.disabled = False
-            page.update()
+            try: page.update()
+            except Exception: pass
             if file_path:
-                _add_to_chat(_bubble(is_user=True, text="[Đã gửi ảnh]"))
-                tf.value = "Hãy phân tích hình ảnh này và tạo task giúp tôi."
-                _send(None, image_path=file_path)
+                import os as _os
+                fname = _os.path.basename(file_path)
+                _add_to_chat(_bubble_file(fname, is_image=True))
+                if _state["session_id"]:
+                    ChatService.add_message(user.id, _state["session_id"],
+                                            "user", f"[📷 Đã gửi ảnh: {fname}]")
+                try:
+                    from core.services import BehaviorService as _BS
+                    _BS.log(user.id, "chat_sent", {"length": 0, "via": "image"})
+                except Exception:
+                    pass
+                _load_sessions_ui()
+                try: page.update()
+                except Exception: pass
+                # Route image through plan reply for structured plan card
+                _run_plan_reply(
+                    "Hãy phân tích hình ảnh này, nhận diện các công việc/nhiệm vụ "
+                    "cần làm và lập kế hoạch chi tiết với các bước thực hiện cụ thể.",
+                    image_path=file_path,
+                )
 
         threading.Thread(target=_run, daemon=True).start()
 
-    btn_attach = ft.IconButton(icon=ft.Icons.IMAGE_ROUNDED,
-                                icon_color=Colors.TEXT_MUTED, on_click=_pick)
+    # ── Voice recording (bấm mic → record mode → bấm Gửi → AI) ──
+    # Dùng sounddevice (có wheel cho Python 3.14); fallback sang sr.Microphone
+    _mic_state = {"recording": False}
+    _rec_ctx   = {}      # frames, samplerate
+    _rec_secs  = [0]
+    rec_timer_ref  = ft.Ref[ft.Text]()
+    input_area_ref = ft.Ref[ft.Container]()
+
+    SAMPLERATE = 16000
+
+    def _start_recording() -> bool:
+        """Bắt đầu ghi âm non-blocking qua sounddevice. Trả về False nếu lỗi."""
+        try:
+            import sounddevice as sd
+            import numpy as np
+
+            _rec_ctx.clear()
+            _rec_ctx["frames"] = []
+            _rec_ctx["sr"]     = SAMPLERATE
+            _mic_state["recording"] = True
+
+            def _callback(indata, frames_count, time_info, status):
+                if _mic_state["recording"]:
+                    _rec_ctx["frames"].append(indata.copy())
+
+            stream = sd.InputStream(
+                samplerate=SAMPLERATE, channels=1, dtype="int16",
+                callback=_callback, blocksize=1024,
+            )
+            stream.start()
+            _rec_ctx["stream"] = stream
+            return True
+
+        except ImportError:
+            snack(page, "❌ Thiếu thư viện sounddevice. Chạy: pip install sounddevice")
+            try: page.update()
+            except Exception: pass
+            return False
+        except Exception as _ex:
+            msg = str(_ex)
+            if "No Default Input" in msg or "Invalid" in msg or "device" in msg.lower():
+                snack(page, "❌ Không tìm thấy micro. Hãy cắm mic và thử lại.")
+            else:
+                snack(page, f"❌ Lỗi micro: {msg[:80]}")
+            try: page.update()
+            except Exception: pass
+            return False
+
+    def _stop_recording() -> str:
+        """Dừng ghi, nhận dạng Google STT, trả về text."""
+        _mic_state["recording"] = False
+
+        stream = _rec_ctx.pop("stream", None)
+        frames = _rec_ctx.pop("frames", [])
+        sr_    = _rec_ctx.pop("sr", SAMPLERATE)
+        _rec_ctx.clear()
+
+        try:
+            if stream:
+                stream.stop(); stream.close()
+        except Exception:
+            pass
+
+        if not frames:
+            snack(page, "⚠️ Không ghi được âm thanh — thử lại.")
+            try: page.update()
+            except Exception: pass
+            return ""
+
+        try:
+            import numpy as np, io, wave as _wave
+            import speech_recognition as sr
+
+            # Gộp frames numpy → bytes PCM int16
+            audio_np = np.concatenate(frames, axis=0).astype(np.int16)
+            raw_bytes = audio_np.tobytes()
+
+            # Tạo WAV in-memory để sr đọc được
+            buf = io.BytesIO()
+            with _wave.open(buf, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)          # int16 = 2 bytes
+                wf.setframerate(sr_)
+                wf.writeframes(raw_bytes)
+            buf.seek(0)
+
+            r = sr.Recognizer()
+            with sr.AudioFile(buf) as src:
+                audio_data = r.record(src)
+
+            lang = stt_code()
+            try:
+                return r.recognize_google(audio_data, language=lang)
+            except sr.UnknownValueError:
+                snack(page, "❌ Không nhận dạng được — nói to và rõ hơn.")
+                try: page.update()
+                except Exception: pass
+                return ""
+            except sr.RequestError as _re:
+                snack(page, f"❌ Lỗi Google STT: {str(_re)[:60]}")
+                try: page.update()
+                except Exception: pass
+                return ""
+            except Exception:
+                try:
+                    return r.recognize_google(audio_data, language="vi-VN")
+                except Exception:
+                    snack(page, "❌ Nhận dạng thất bại — thử lại.")
+                    try: page.update()
+                    except Exception: pass
+                    return ""
+        except ImportError as _ie:
+            snack(page, f"❌ Thiếu thư viện: {_ie}")
+            try: page.update()
+            except Exception: pass
+            return ""
+        except Exception as _ex:
+            snack(page, f"❌ Nhận dạng: {str(_ex)[:60]}")
+            try: page.update()
+            except Exception: pass
+            return ""
+
+    def _timer_loop():
+        import time as _time
+        _rec_secs[0] = 0
+        while _mic_state.get("recording"):
+            _time.sleep(1)
+            _rec_secs[0] += 1
+            if rec_timer_ref.current:
+                s = _rec_secs[0]
+                rec_timer_ref.current.value = f"{s // 60}:{s % 60:02d}"
+                try: page.update()
+                except Exception: pass
+
+    # ── Chuyển đổi giao diện recording / normal ────────────────
+    def _make_rec_row():
+        return ft.Row([
+            # Nút hủy
+            ft.Container(
+                content=ft.Icon(ft.Icons.CLOSE_ROUNDED, size=20, color=Colors.TEXT_MUTED),
+                width=42, height=42, border_radius=Radius.LG,
+                bgcolor=Colors.BG_INPUT, border=ft.Border.all(1, Colors.BORDER),
+                alignment=ft.Alignment.CENTER,
+                on_click=_cancel_recording, ink=True, tooltip="Huỷ",
+            ),
+            # Thanh hiển thị đang ghi
+            ft.Container(
+                content=ft.Row([
+                    ft.Container(
+                        width=9, height=9, border_radius=5, bgcolor=Colors.ERROR,
+                        animate=ft.Animation(700, ft.AnimationCurve.EASE_IN_OUT),
+                    ),
+                    ft.Text("Đang ghi âm...", size=Typography.SMALL,
+                            color=Colors.ERROR, weight=Typography.SEMIBOLD),
+                    ft.Container(expand=True),
+                    ft.Text("0:00", ref=rec_timer_ref,
+                            size=Typography.SMALL, color=Colors.TEXT_MUTED),
+                ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                expand=True, height=44,
+                border_radius=Radius.LG,
+                bgcolor=f"#14EF4444",
+                border=ft.Border.all(1.5, Colors.ERROR),
+                padding=ft.padding.symmetric(horizontal=14),
+                animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
+            ),
+            # Nút gửi giọng nói
+            ft.Container(
+                content=ft.Row([
+                    ft.Icon(ft.Icons.SEND_ROUNDED, color="white", size=18),
+                ], alignment=ft.MainAxisAlignment.CENTER),
+                width=46, height=46, border_radius=Radius.LG,
+                gradient=ft.LinearGradient(
+                    colors=["#EF4444", "#B91C1C"],
+                    begin=ft.Alignment.TOP_LEFT, end=ft.Alignment.BOTTOM_RIGHT,
+                ),
+                alignment=ft.Alignment.CENTER,
+                on_click=_send_voice, ink=True,
+                tooltip="Gửi giọng nói",
+                shadow=ft.BoxShadow(blur_radius=10, color="#40EF4444",
+                                    offset=ft.Offset(0, 3)),
+            ),
+        ], spacing=Spacing.SM)
+
+    def _enter_recording_mode():
+        if input_area_ref.current:
+            input_area_ref.current.content = _make_rec_row()
+        try: page.update()
+        except Exception: pass
+        threading.Thread(target=_timer_loop, daemon=True).start()
+
+    def _exit_recording_mode():
+        if input_area_ref.current:
+            input_area_ref.current.content = _normal_input_row
+        try: page.update()
+        except Exception: pass
+
+    def _cancel_recording(_=None):
+        _mic_state["recording"] = False
+        import time; time.sleep(0.05)
+        _exit_recording_mode()
+
+    def _send_voice(_=None):
+        """Dừng ghi, nhận dạng, gửi cho AI."""
+        def _worker():
+            _exit_recording_mode()          # trả UI về normal ngay
+            recognized = _stop_recording()
+            if not recognized:
+                return
+            # Thêm voice bubble tím
+            _add_to_chat(_bubble_voice(recognized))
+            if _state["session_id"]:
+                from core.services import ChatService as _CS
+                _CS.add_message(user.id, _state["session_id"], "user", recognized)
+            try:
+                from core.services import BehaviorService as _BS
+                _BS.log(user.id, "chat_sent", {"length": len(recognized), "via": "voice"})
+            except Exception:
+                pass
+            _load_sessions_ui()
+            try: page.update()
+            except Exception: pass
+            # Gửi cho AI
+            from core.ai_planner_service import detect_plan_intent
+            intent = detect_plan_intent(recognized)
+            if intent:
+                _run_plan_reply(recognized, last_plan=_state.get("last_plan"))
+            else:
+                _run_text_reply(recognized)
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _toggle_mic(_):
+        if _mic_state.get("recording"):
+            _cancel_recording()
+            return
+        if _start_recording():
+            _enter_recording_mode()
+
+    btn_mic = ft.Container(
+        content=ft.Icon(ft.Icons.MIC_NONE_ROUNDED, size=22, color=Colors.TEXT_MUTED),
+        width=42, height=42,
+        border_radius=Radius.LG,
+        bgcolor=Colors.BG_INPUT,
+        border=ft.Border.all(1, Colors.BORDER),
+        alignment=ft.Alignment.CENTER,
+        on_click=_toggle_mic, ink=True,
+        tooltip=t("mic_hint"),
+    )
+
+    # ── Attachment menu ────────────────────────────────────────
+    def _open_attach_menu(_):
+        attach_bs = [None]
+
+        def _close():
+            attach_bs[0].open = False
+            page.update()
+
+        def _pick_image(_):
+            _close()
+            _pick(None)
+
+        def _show_history(_):
+            _close()
+            toggle_history(None)
+
+        def _pick_file(_):
+            _close()
+            def _run():
+                try:
+                    import tkinter as tk
+                    from tkinter import filedialog
+                    root = tk.Tk()
+                    root.attributes("-topmost", True)
+                    root.withdraw()
+                    path = filedialog.askopenfilename(
+                        title="Chọn file",
+                        filetypes=[
+                            ("Tài liệu", "*.docx;*.doc;*.xlsx;*.xls;*.pdf;*.txt;*.csv;*.md"),
+                            ("Tất cả", "*.*"),
+                        ],
+                    )
+                    root.destroy()
+                except Exception:
+                    path = None
+
+                if not path:
+                    return
+
+                import os as _os
+                fname = _os.path.basename(path)
+                ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
+
+                # Show file bubble in chat
+                _add_to_chat(_bubble_file(fname, is_image=False))
+                if _state["session_id"]:
+                    ChatService.add_message(user.id, _state["session_id"],
+                                            "user", f"[📎 File: {fname}]")
+                try: page.update()
+                except Exception: pass
+
+                # ── Extract text from file ────────────────────────────────
+                extracted = ""
+                error_msg = ""
+                try:
+                    if ext in ("txt", "csv", "md", "log", "ini", "json", "xml"):
+                        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                            extracted = f.read(12000)
+
+                    elif ext in ("xlsx", "xls"):
+                        try:
+                            import openpyxl
+                            wb = openpyxl.load_workbook(path, data_only=True)
+                            lines = []
+                            for ws in wb.worksheets[:3]:
+                                lines.append(f"=== Sheet: {ws.title} ===")
+                                for row in ws.iter_rows(max_row=150, values_only=True):
+                                    row_vals = [str(c) if c is not None else "" for c in row]
+                                    if any(v.strip() for v in row_vals):
+                                        lines.append(" | ".join(row_vals))
+                            extracted = "\n".join(lines)[:10000]
+                        except ImportError:
+                            try:
+                                import pandas as _pd
+                                df = _pd.read_excel(path, nrows=150)
+                                extracted = df.to_string(max_rows=150)[:10000]
+                            except ImportError:
+                                error_msg = "Cần cài thư viện: pip install openpyxl"
+
+                    elif ext in ("docx", "doc"):
+                        try:
+                            import docx as _docx
+                            doc = _docx.Document(path)
+                            paras = [p.text for p in doc.paragraphs if p.text.strip()]
+                            extracted = "\n".join(paras)[:10000]
+                        except ImportError:
+                            error_msg = "Cần cài thư viện: pip install python-docx"
+
+                    elif ext == "pdf":
+                        try:
+                            import pdfplumber
+                            with pdfplumber.open(path) as pdf:
+                                pages_text = []
+                                for pg in pdf.pages[:15]:
+                                    txt = pg.extract_text() or ""
+                                    if txt.strip():
+                                        pages_text.append(txt)
+                                extracted = "\n".join(pages_text)[:10000]
+                        except ImportError:
+                            try:
+                                import PyPDF2
+                                with open(path, "rb") as f:
+                                    reader = PyPDF2.PdfReader(f)
+                                    pages_text = []
+                                    for pg in reader.pages[:15]:
+                                        pages_text.append(pg.extract_text() or "")
+                                extracted = "\n".join(pages_text)[:10000]
+                            except ImportError:
+                                error_msg = "Cần cài thư viện: pip install pdfplumber"
+
+                    else:
+                        # Fallback: try reading as UTF-8 text
+                        try:
+                            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                                extracted = f.read(8000)
+                        except Exception:
+                            error_msg = f"Không hỗ trợ định dạng .{ext}"
+
+                except Exception as _fe:
+                    error_msg = f"Lỗi đọc file: {str(_fe)[:80]}"
+
+                if error_msg:
+                    _add_to_chat(_bubble(f"❌ {error_msg}", is_user=False))
+                    try: page.update()
+                    except Exception: pass
+                    return
+
+                if not extracted.strip():
+                    _add_to_chat(_bubble(
+                        "⚠️ Không đọc được nội dung file — file có thể trống hoặc bị mã hóa.",
+                        is_user=False))
+                    try: page.update()
+                    except Exception: pass
+                    return
+
+                # ── Send extracted content to AI planner ─────────────────
+                analysis_msg = (
+                    f"Đây là nội dung file '{fname}':\n\n"
+                    f"{extracted}\n\n"
+                    "Hãy phân tích nội dung trên, nhận diện các công việc/nhiệm vụ/deadline "
+                    "và lập kế hoạch chi tiết với các bước thực hiện cụ thể, "
+                    "sau đó đề xuất các task có thể lưu vào app."
+                )
+                _run_plan_reply(analysis_msg, last_plan=_state.get("last_plan"))
+
+            threading.Thread(target=_run, daemon=True).start()
+
+        def _menu_opt(icon, label, subtitle, color, on_tap):
+            return ft.Container(
+                content=ft.Row([
+                    ft.Container(
+                        content=ft.Icon(icon, size=22, color=color),
+                        width=46, height=46, border_radius=Radius.MD,
+                        bgcolor=f"#18{color[1:]}" if color.startswith("#") else Colors.PRIMARY_BG,
+                        alignment=ft.Alignment.CENTER,
+                    ),
+                    ft.Column([
+                        ft.Text(label, size=Typography.BODY, color=Colors.TEXT_PRIMARY,
+                                weight=Typography.SEMIBOLD),
+                        ft.Text(subtitle, size=Typography.TINY, color=Colors.TEXT_MUTED),
+                    ], spacing=1, tight=True, expand=True),
+                    ft.Icon(ft.Icons.CHEVRON_RIGHT, size=16, color=Colors.TEXT_MUTED),
+                ], spacing=Spacing.MD, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                padding=ft.padding.symmetric(horizontal=Spacing.LG, vertical=13),
+                on_click=on_tap, ink=True, border_radius=Radius.SM,
+            )
+
+        _div_line = lambda: ft.Container(height=1, bgcolor=Colors.BORDER,
+                                         margin=ft.margin.only(left=74, right=Spacing.LG))
+
+        sheet_content = ft.Column([
+            ft.Container(
+                content=ft.Container(width=40, height=4, border_radius=2, bgcolor="#888888"),
+                alignment=ft.Alignment.CENTER,
+                padding=ft.padding.only(top=12, bottom=12),
+            ),
+            ft.Container(
+                content=ft.Text(t("attach_title"), size=Typography.H4,
+                                color=Colors.TEXT_PRIMARY, weight=Typography.BOLD,
+                                text_align=ft.TextAlign.CENTER),
+                alignment=ft.Alignment.CENTER,
+                padding=ft.padding.only(bottom=Spacing.SM),
+            ),
+            ft.Container(height=1, bgcolor=Colors.BORDER,
+                         margin=ft.margin.symmetric(horizontal=Spacing.LG)),
+            _menu_opt(ft.Icons.DESCRIPTION_ROUNDED, t("upload_file"),
+                      t("upload_file_sub"), Colors.ACCENT_CYAN, _pick_file),
+            _div_line(),
+            _menu_opt(ft.Icons.IMAGE_ROUNDED, t("upload_image"),
+                      t("upload_image_sub"), Colors.VIOLET, _pick_image),
+            _div_line(),
+            _menu_opt(ft.Icons.HISTORY_ROUNDED, t("chat_history"),
+                      t("chat_history_sub"), Colors.PRIMARY, _show_history),
+            ft.Container(height=Spacing.XXL),
+        ], spacing=0, tight=True)
+
+        bs = ft.BottomSheet(
+            content=ft.Container(
+                content=sheet_content,
+                bgcolor=Colors.BG_CARD,
+                border_radius=ft.BorderRadius.only(top_left=Radius.XL, top_right=Radius.XL),
+                padding=0,
+                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+            ),
+            open=True, draggable=True, use_safe_area=True,
+        )
+        attach_bs[0] = bs
+        page.overlay.append(bs)
+        page.update()
+
+    btn_attach_menu = ft.Container(
+        content=ft.Icon(ft.Icons.ADD_ROUNDED, size=20, color=Colors.TEXT_PRIMARY),
+        width=42, height=42,
+        border_radius=Radius.LG,
+        bgcolor=Colors.BG_INPUT,
+        border=ft.Border.all(1, Colors.BORDER),
+        alignment=ft.Alignment.CENTER,
+        on_click=_open_attach_menu, ink=True,
+        tooltip=t("attach_title"),
+    )
 
     # ── Reply logic ────────────────────────────────────────────
     def _do_refine(option: str):
@@ -513,77 +1242,106 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
             pass
         _run_plan_reply(option, last_plan=_state.get("last_plan"))
 
-    def _run_plan_reply(message: str, last_plan: dict = None):
+    def _run_plan_reply(message: str, last_plan: dict = None, image_path: str = None):
         _typing.visible = True
-        page.update()
+        try:
+            page.update()
+        except Exception:
+            pass
         _scroll_down()
 
         def _worker():
-            from core.ai_planner_service import get_plan_response
-            result = get_plan_response(message, user.id, last_plan=last_plan)
-            _typing.visible = False
+            try:
+                from core.ai_planner_service import get_plan_response
+                lang_instr = ai_lang_instruction()
+                full_msg = f"{lang_instr}\n{message}".strip() if lang_instr else message
+                result = get_plan_response(full_msg, user.id, last_plan=last_plan,
+                                           image_path=image_path)
+            except Exception as _exc:
+                logger.exception("_run_plan_reply failed")
+                result = {"type": "normal_chat",
+                          "message": f"❌ Lỗi kết nối AI: {str(_exc)[:80]}"}
+            finally:
+                _typing.visible = False
 
-            if result.get("type") == "plan_result":
-                _state["last_plan"] = result
-                row = _plan_row(result)
-                _add_to_chat(row)
-                # Also save a text summary to chat history
-                summary = f"[Kế hoạch] {result.get('title', '')}\n{result.get('summary', '')}"
-                if _state["session_id"]:
-                    ChatService.add_message(user.id, _state["session_id"], "model", summary)
+            try:
+                if result.get("type") == "plan_result":
+                    _state["last_plan"] = result
+                    _current_plan_data[0] = result
+                    row = _plan_row(result)
+                    _add_to_chat(row)
+                    summary = f"[Kế hoạch] {result.get('title', '')}\n{result.get('summary', '')}"
+                    if _state["session_id"]:
+                        ChatService.add_message(user.id, _state["session_id"], "model", summary)
 
-            elif result.get("type") == "task_create":
-                # Show as a quick-create task bubble
-                msg = (f"📋 Task gợi ý:\n"
-                       f"**{result.get('title', '')}**\n"
-                       f"Ưu tiên: {result.get('priority', 'medium')} | "
-                       f"Hạn: {result.get('due_date') or 'chưa đặt'}")
-                _add_to_chat(_bubble(msg, is_user=False))
-                _show_task_create_confirm(result)
-                if _state["session_id"]:
-                    ChatService.add_message(user.id, _state["session_id"], "model", msg)
+                elif result.get("type") == "task_create":
+                    msg = (f"📋 Task gợi ý:\n"
+                           f"**{result.get('title', '')}**\n"
+                           f"Ưu tiên: {result.get('priority', 'medium')} | "
+                           f"Hạn: {result.get('due_date') or 'chưa đặt'}")
+                    _add_to_chat(_bubble(msg, is_user=False))
+                    _show_task_create_confirm(result)
+                    if _state["session_id"]:
+                        ChatService.add_message(user.id, _state["session_id"], "model", msg)
 
-            else:
-                # normal_chat fallback
-                msg = result.get("message", "Mình sẽ hỗ trợ bạn lập kế hoạch và quản lý task.")
-                _add_to_chat(_bubble(msg, is_user=False))
-                if _state["session_id"]:
-                    ChatService.add_message(user.id, _state["session_id"], "model", msg)
+                else:
+                    msg = result.get("message", "Mình sẽ hỗ trợ bạn lập kế hoạch và quản lý task.")
+                    _add_to_chat(_bubble(msg, is_user=False))
+                    if _state["session_id"]:
+                        ChatService.add_message(user.id, _state["session_id"], "model", msg)
 
-            _load_sessions_ui()
+                _load_sessions_ui()
+            except Exception:
+                logger.exception("_run_plan_reply render failed")
             try:
                 page.update()
-            except RuntimeError:
+            except Exception:
                 pass
 
         threading.Thread(target=_worker, daemon=True).start()
 
     def _run_text_reply(message: str, image_path: str = None):
         _typing.visible = True
-        page.update()
+        try:
+            page.update()
+        except Exception:
+            pass
         _scroll_down()
 
         def _worker():
-            from utils.ai_helper import get_ai_reply, extract_task_from_reply
-            reply = get_ai_reply(user.settings, message, user.id,
-                                 _state["session_id"], image_path)
-            _typing.visible = False
-            _add_to_chat(_bubble(reply, is_user=False))
-            if _state["session_id"]:
-                ChatService.add_message(user.id, _state["session_id"], "model", reply)
-
-            # Check for inline task suggestion
+            reply = ""
             try:
-                task_data = extract_task_from_reply(reply, user.id)
-                if task_data:
-                    _show_inline_task_btn(task_data)
-            except Exception:
-                logger.exception("extract_task_from_reply failed")
+                from utils.ai_helper import get_ai_reply, extract_task_from_reply
+                lang_instr = ai_lang_instruction()
+                full_msg = f"{lang_instr}\n{message}".strip() if lang_instr else message
+                reply = get_ai_reply(user.settings, full_msg, user.id,
+                                     _state["session_id"], image_path)
+            except Exception as _exc:
+                logger.exception("_run_text_reply get_ai_reply failed")
+                reply = f"❌ Không thể kết nối AI: {str(_exc)[:80]}"
+            finally:
+                _typing.visible = False
 
-            _load_sessions_ui()
+            try:
+                _add_to_chat(_bubble(reply, is_user=False))
+                if _state["session_id"]:
+                    ChatService.add_message(user.id, _state["session_id"], "model", reply)
+
+                # Check for inline task suggestion
+                try:
+                    from utils.ai_helper import extract_task_from_reply as _etr
+                    task_data = _etr(reply, user.id)
+                    if task_data:
+                        _show_inline_task_btn(task_data)
+                except Exception:
+                    logger.exception("extract_task_from_reply failed")
+
+                _load_sessions_ui()
+            except Exception:
+                logger.exception("_run_text_reply render failed")
             try:
                 page.update()
-            except RuntimeError:
+            except Exception:
                 pass
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -651,7 +1409,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
                     updated_at=now_str,
                 )
                 _TS.save_task(new_t)
-                snack(page, f"✓ Đã tạo: {new_t.title}")
+                snack(page, t("task_created", title=new_t.title))
                 if btn_row in chat_lv.controls:
                     chat_lv.controls.remove(btn_row)
                 page.update()
@@ -663,7 +1421,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
             ft.Container(
                 content=ft.Row([
                     ft.Icon(ft.Icons.ADD_TASK_ROUNDED, size=13, color="white"),
-                    ft.Text(f'Tạo: "{task_data.get("title", "")[:28]}"',
+                    ft.Text(t("create_short", title=task_data.get("title", "")[:28]),
                             size=Typography.TINY, color="white",
                             weight=Typography.SEMIBOLD),
                 ], spacing=5, tight=True),
@@ -688,7 +1446,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
 
         tf_title = ft.TextField(
             value=data.get("title", ""),
-            label="Tiêu đề",
+            label=t("title_label"),
             bgcolor=Colors.BG_SURFACE, border_color=Colors.BORDER,
             focused_border_color=Colors.PRIMARY,
             text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY, size=Typography.SMALL),
@@ -698,7 +1456,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         )
         tf_due = ft.TextField(
             value=data.get("due_date") or "",
-            label="Hạn (YYYY-MM-DD)",
+            label=t("due_date_label"),
             bgcolor=Colors.BG_SURFACE, border_color=Colors.BORDER,
             focused_border_color=Colors.PRIMARY,
             text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY, size=Typography.SMALL),
@@ -709,7 +1467,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         )
         tf_time = ft.TextField(
             value=data.get("due_time") or "",
-            label="Giờ (HH:MM)",
+            label=t("due_time_label"),
             bgcolor=Colors.BG_SURFACE, border_color=Colors.BORDER,
             focused_border_color=Colors.PRIMARY,
             text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY, size=Typography.SMALL),
@@ -722,7 +1480,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         def _save(_):
             title = tf_title.value.strip()
             if not title:
-                snack(page, "⚠️ Vui lòng nhập tiêu đề!")
+                snack(page, t("title_required"))
                 return
             now_str = datetime.now().isoformat()
             new_t = _Task(
@@ -743,7 +1501,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
             _TS.save_task(new_t)
             bs[0].open = False
             page.update()
-            snack(page, f"✓ Đã tạo: {title}")
+            snack(page, t("task_created", title=title))
 
         def _cancel(_):
             bs[0].open = False
@@ -760,7 +1518,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
                 content=ft.Column([
                     ft.Row([
                         ft.Icon(ft.Icons.ADD_TASK_ROUNDED, size=18, color=Colors.PRIMARY),
-                        ft.Text("Xác nhận tạo Task", size=Typography.H3,
+                        ft.Text(t("confirm_create_task"), size=Typography.H3,
                                 color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
                     ], spacing=Spacing.SM),
                     ft.Container(height=Spacing.SM),
@@ -770,7 +1528,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
                     ft.Container(height=Spacing.MD),
                     ft.Row([
                         ft.Container(
-                            content=ft.Text("Hủy", size=Typography.BODY,
+                            content=ft.Text(t("cancel"), size=Typography.BODY,
                                             color=Colors.TEXT_MUTED),
                             height=44, expand=True, border_radius=Radius.MD,
                             bgcolor=Colors.BG_SURFACE,
@@ -782,7 +1540,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
                         ft.Container(
                             content=ft.Row([
                                 ft.Icon(ft.Icons.CHECK_ROUNDED, size=16, color="white"),
-                                ft.Text("Lưu Task", size=Typography.BODY, color="white",
+                                ft.Text(t("save_task_btn"), size=Typography.BODY, color="white",
                                         weight=Typography.SEMIBOLD),
                             ], alignment=ft.MainAxisAlignment.CENTER, spacing=4),
                             height=44, expand=True, border_radius=Radius.MD,
@@ -845,7 +1603,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         )
 
     chips_row = ft.Row(
-        [_chip(e, l, p) for e, l, p in _QUICK_PROMPTS],
+        [_chip(e, l, p) for e, l, p in _get_quick_prompts()],
         scroll=ft.ScrollMode.AUTO, spacing=Spacing.SM,
     )
 
@@ -855,8 +1613,8 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
     def toggle_history(e):
         _history_state["open"] = not _history_state["open"]
         if _history_state["open"]:
-            history_panel.width = 250
-            history_panel.padding = 16
+            history_panel.width = 260
+            history_panel.padding = 0
         else:
             history_panel.width = 0
             history_panel.padding = 0
@@ -869,62 +1627,140 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         if _history_state["open"]:
             toggle_history(None)
 
-    history_lv = ft.ListView(expand=True, spacing=8, controls=[])
+    history_lv = ft.ListView(
+        expand=True, spacing=0, controls=[],
+        padding=ft.padding.symmetric(horizontal=8, vertical=8),
+    )
+
+    history_panel_header = ft.Container(
+        content=ft.Row([
+            ft.Icon(ft.Icons.HISTORY_ROUNDED, size=16, color=Colors.PRIMARY),
+            ft.Text(t("history"), size=Typography.BODY, color=Colors.TEXT_PRIMARY,
+                    weight=Typography.BOLD, expand=True),
+            ft.Container(
+                content=ft.Icon(ft.Icons.EDIT_OUTLINED, size=15, color=Colors.TEXT_MUTED),
+                width=30, height=30, border_radius=Radius.MD,
+                bgcolor=Colors.BG_SURFACE, alignment=ft.Alignment.CENTER,
+                on_click=_start_new_chat, ink=True, tooltip=t("new_chat"),
+            ),
+            ft.Container(width=4),
+            ft.Container(
+                content=ft.Icon(ft.Icons.CLOSE_ROUNDED, size=15, color=Colors.TEXT_MUTED),
+                width=30, height=30, border_radius=Radius.MD,
+                bgcolor=Colors.BG_SURFACE, alignment=ft.Alignment.CENTER,
+                on_click=toggle_history, ink=True,
+            ),
+        ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        padding=ft.padding.symmetric(horizontal=12, vertical=10),
+        border=ft.Border(bottom=ft.BorderSide(1, Colors.BORDER)),
+    )
+
     history_panel = ft.Container(
         content=ft.Column([
-            ft.Text("Lịch sử", size=Typography.H4, weight=ft.FontWeight.BOLD),
-            ft.Divider(color=Colors.BORDER),
+            history_panel_header,
             history_lv,
-        ]),
+        ], spacing=0, tight=True, expand=True),
         width=0, bgcolor=Colors.BG_DARK, padding=0,
         border=ft.Border(left=ft.BorderSide(1, Colors.BORDER)),
-        animate=ft.Animation(300, ft.AnimationCurve.EASE_OUT_CUBIC),
+        animate=ft.Animation(250, ft.AnimationCurve.EASE_OUT_CUBIC),
         clip_behavior=ft.ClipBehavior.HARD_EDGE,
     )
 
-    btn_menu = ft.IconButton(icon=ft.Icons.MENU_ROUNDED,
-                              icon_color=Colors.TEXT_PRIMARY, on_click=toggle_history)
-
     def _load_sessions_ui():
+        from datetime import datetime as _dt, timedelta as _td
         sessions = ChatService.get_sessions(user.id)
-        controls = []
+
+        today     = _dt.now().date()
+        yesterday = today - _td(days=1)
+        week_ago  = today - _td(days=7)
+
+        g_keys = [t("today"), t("yesterday"), t("last_7_days"), t("older")]
+        groups = {k: [] for k in g_keys}
         for s in sessions:
-            is_active = (s["id"] == _state["session_id"])
+            try:
+                d = _dt.fromisoformat(s.get("created_at", "")).date()
+            except Exception:
+                d = today
+            if d == today:
+                groups[g_keys[0]].append(s)
+            elif d == yesterday:
+                groups[g_keys[1]].append(s)
+            elif d >= week_ago:
+                groups[g_keys[2]].append(s)
+            else:
+                groups[g_keys[3]].append(s)
 
-            def make_select(sid):
-                return lambda e: _switch_session(sid)
+        def make_select(sid):
+            return lambda e: _switch_session(sid)
 
-            def make_delete(sid):
-                return lambda e: _delete_session(sid)
+        def make_delete(sid):
+            return lambda e: _delete_session(sid)
 
-            item = ft.Container(
-                content=ft.Row([
-                    ft.Icon(ft.Icons.CHAT_BUBBLE_OUTLINE, size=16,
-                            color=Colors.PRIMARY if is_active else Colors.TEXT_MUTED),
-                    ft.Text(s.get("title", "Chat"), expand=True,
+        controls = []
+        for group_name, group_sessions in groups.items():
+            if not group_sessions:
+                continue
+            controls.append(ft.Container(
+                content=ft.Text(group_name, size=9, color=Colors.TEXT_MUTED,
+                                weight=Typography.SEMIBOLD),
+                padding=ft.padding.only(left=6, top=8, bottom=2),
+            ))
+            for s in group_sessions:
+                is_active = (s["id"] == _state["session_id"])
+                item = ft.Container(
+                    content=ft.Row([
+                        ft.Icon(
+                            ft.Icons.CHAT_BUBBLE_ROUNDED if is_active
+                            else ft.Icons.CHAT_BUBBLE_OUTLINE_ROUNDED,
+                            size=13,
+                            color=Colors.PRIMARY if is_active else Colors.TEXT_MUTED,
+                        ),
+                        ft.Text(
+                            s.get("title", "Chat"),
+                            expand=True,
                             color=Colors.TEXT_PRIMARY if is_active else Colors.TEXT_SECONDARY,
-                            size=Typography.BODY, no_wrap=True),
-                    ft.IconButton(ft.Icons.CLOSE, icon_size=16,
-                                  icon_color=Colors.TEXT_MUTED,
-                                  on_click=make_delete(s["id"]), padding=0),
-                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                padding=10, border_radius=8,
-                bgcolor=Colors.BG_SURFACE if is_active else "transparent",
-                on_click=make_select(s["id"]), ink=True,
-            )
-            controls.append(item)
+                            size=Typography.TINY,
+                            no_wrap=True,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                            max_lines=1,
+                        ),
+                        ft.GestureDetector(
+                            on_tap=make_delete(s["id"]),
+                            content=ft.Container(
+                                content=ft.Icon(ft.Icons.CLOSE_ROUNDED, size=11,
+                                                color=Colors.TEXT_MUTED),
+                                width=20, height=20, border_radius=Radius.SM,
+                                alignment=ft.Alignment.CENTER,
+                            ),
+                        ),
+                    ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    padding=ft.padding.symmetric(horizontal=8, vertical=7),
+                    border_radius=Radius.MD,
+                    bgcolor=Colors.PRIMARY_BG if is_active else "transparent",
+                    border=ft.Border.all(1, Colors.PRIMARY_BORDER) if is_active else None,
+                    on_click=make_select(s["id"]),
+                    ink=True,
+                    margin=ft.margin.only(bottom=2),
+                )
+                controls.append(item)
 
-        btn_clear = ft.Container(
-            content=ft.Row([
-                ft.Icon(ft.Icons.DELETE_OUTLINE_ROUNDED, color=Colors.ERROR, size=18),
-                ft.Text("Xóa tất cả", color=Colors.ERROR, size=Typography.BODY),
-            ]),
-            padding=10, border_radius=8, bgcolor=Colors.BG_SURFACE,
-            on_click=lambda _: _clear_all_sessions(), ink=True,
-        )
-        if controls:
-            controls.append(ft.Divider(color=Colors.BORDER))
-        controls.append(btn_clear)
+        if sessions:
+            controls.append(ft.Container(
+                content=ft.Container(height=1, bgcolor=Colors.BORDER),
+                padding=ft.padding.only(top=10, bottom=2),
+            ))
+            controls.append(ft.Container(
+                content=ft.Row([
+                    ft.Icon(ft.Icons.DELETE_SWEEP_ROUNDED, size=13, color=Colors.ERROR),
+                    ft.Text(t("delete_all"), size=Typography.TINY, color=Colors.ERROR),
+                ], spacing=6),
+                padding=ft.padding.symmetric(horizontal=8, vertical=7),
+                border_radius=Radius.MD,
+                bgcolor=f"#10{Colors.ERROR[1:]}",
+                on_click=lambda _: _clear_all_sessions(),
+                ink=True,
+            ))
+
         history_lv.controls = controls
         try:
             page.update()
@@ -985,6 +1821,10 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
                     _bubble(msg["text"], is_user=(msg["role"] == "user"), animate=False)
                 )
 
+        # Re-render last plan card if user navigated away and back
+        if _current_plan_data[0]:
+            chat_lv.controls.append(_plan_row(_current_plan_data[0]))
+
         chat_lv.controls.append(_typing)
         _load_sessions_ui()
         try:
@@ -992,6 +1832,21 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
             _scroll_down()
         except Exception:
             pass
+
+    # ── AI mode banner (no API key) ────────────────────────────
+    import os as _os
+    _has_api_key = bool(_os.environ.get("GEMINI_API_KEY", "").strip())
+    ai_mode_banner = ft.Container(
+        content=ft.Row([
+            ft.Text("🤖", size=12),
+            ft.Text(t("ai_demo_mode"),
+                    size=Typography.TINY, color="#92400E", expand=True),
+        ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        padding=ft.Padding.symmetric(horizontal=Spacing.MD, vertical=6),
+        bgcolor="#FEF3C7",
+        border=ft.Border(bottom=ft.BorderSide(1, "#FDE68A")),
+        visible=not _has_api_key,
+    )
 
     # ── Header ─────────────────────────────────────────────────
     header = ft.Container(
@@ -1009,7 +1864,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
                 ft.Row([
                     ft.Container(width=7, height=7, border_radius=4,
                                  bgcolor=Colors.SUCCESS),
-                    ft.Text("AI Planner · Đang hoạt động", size=Typography.TINY,
+                    ft.Text(t("ai_active"), size=Typography.TINY,
                             color=Colors.SUCCESS),
                 ], spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ], spacing=2, tight=True),
@@ -1038,9 +1893,15 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         shadow=ft.BoxShadow(blur_radius=8, color="#00000012", offset=ft.Offset(0, 2)),
     )
 
+    # ── Normal input row (defined here so all widgets exist) ──────
+    _normal_input_row = ft.Row(
+        [btn_attach_menu, btn_mic, tf, send_btn], spacing=Spacing.SM
+    )
+
     # ── Assemble ───────────────────────────────────────────────
     main_chat = ft.Column([
         header,
+        ai_mode_banner,
         chat_lv,
         ft.Container(
             content=chips_row,
@@ -1048,7 +1909,8 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
             border=ft.Border(top=ft.BorderSide(1, Colors.BORDER)),
         ),
         ft.Container(
-            content=ft.Row([btn_menu, btn_attach, tf, send_btn], spacing=Spacing.SM),
+            ref=input_area_ref,
+            content=_normal_input_row,
             padding=ft.Padding.symmetric(horizontal=Spacing.MD, vertical=Spacing.SM),
             bgcolor=Colors.BG_DARKEST,
         ),

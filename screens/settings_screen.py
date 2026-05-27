@@ -5,6 +5,7 @@ import flet as ft
 from core.theme import Colors, Typography, Spacing, Radius
 from core.services import AuthService
 from components.widgets import primary_button, primary_divider, avatar_circle, snack
+from core.i18n import t, get_lang, set_lang
 
 AVATAR_COLORS = [
     "#F5A623","#8B5CF6","#06B6D4","#FB923C","#F43F5E",
@@ -72,12 +73,12 @@ def build_settings_screen(page: ft.Page, user, on_navigate, on_logout):
     color_pickers = [color_circle(c) for c in AVATAR_COLORS]
 
     tf_name = ft.TextField(
-        label="Ho va ten", value=user.full_name, bgcolor=Colors.BG_INPUT, border_color=Colors.BORDER,
+        label=t("full_name"), value=user.full_name, bgcolor=Colors.BG_INPUT, border_color=Colors.BORDER,
         focused_border_color=Colors.PRIMARY, text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY),
         label_style=ft.TextStyle(color=Colors.TEXT_SECONDARY), border_radius=Radius.MD, cursor_color=Colors.PRIMARY,
     )
     tf_work_start = ft.TextField(
-        label="Bắt đầu làm việc", hint_text="08:00",
+        label=t("work_start"), hint_text="08:00",
         value=getattr(user, "work_start", "08:00"),
         width=150, text_size=Typography.SMALL,
         bgcolor=Colors.BG_INPUT, border_color=Colors.BORDER,
@@ -87,7 +88,7 @@ def build_settings_screen(page: ft.Page, user, on_navigate, on_logout):
         border_radius=Radius.MD, cursor_color=Colors.PRIMARY,
     )
     tf_work_end = ft.TextField(
-        label="Kết thúc làm việc", hint_text="18:00",
+        label=t("work_end"), hint_text="18:00",
         value=getattr(user, "work_end", "18:00"),
         width=150, text_size=Typography.SMALL,
         bgcolor=Colors.BG_INPUT, border_color=Colors.BORDER,
@@ -97,17 +98,17 @@ def build_settings_screen(page: ft.Page, user, on_navigate, on_logout):
         border_radius=Radius.MD, cursor_color=Colors.PRIMARY,
     )
 
-    tf_old_pwd = ft.TextField(label="Mật khẩu cũ", password=True, can_reveal_password=True,
+    tf_old_pwd = ft.TextField(label=t("old_password"), password=True, can_reveal_password=True,
         bgcolor=Colors.BG_INPUT, border_color=Colors.BORDER, focused_border_color=Colors.PRIMARY,
         text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY), label_style=ft.TextStyle(color=Colors.TEXT_SECONDARY),
         border_radius=Radius.MD, cursor_color=Colors.PRIMARY)
 
-    tf_new_pwd = ft.TextField(label="Mật khẩu mới", password=True, can_reveal_password=True,
+    tf_new_pwd = ft.TextField(label=t("new_password"), password=True, can_reveal_password=True,
         bgcolor=Colors.BG_INPUT, border_color=Colors.BORDER, focused_border_color=Colors.PRIMARY,
         text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY), label_style=ft.TextStyle(color=Colors.TEXT_SECONDARY),
         border_radius=Radius.MD, cursor_color=Colors.PRIMARY)
 
-    tf_cfm_pwd = ft.TextField(label="Xác nhận mật khẩu mới", password=True, can_reveal_password=True,
+    tf_cfm_pwd = ft.TextField(label=t("confirm_password"), password=True, can_reveal_password=True,
         bgcolor=Colors.BG_INPUT, border_color=Colors.BORDER, focused_border_color=Colors.PRIMARY,
         text_style=ft.TextStyle(color=Colors.TEXT_PRIMARY), label_style=ft.TextStyle(color=Colors.TEXT_SECONDARY),
         border_radius=Radius.MD, cursor_color=Colors.PRIMARY)
@@ -143,11 +144,70 @@ def build_settings_screen(page: ft.Page, user, on_navigate, on_logout):
             ], spacing=0, tight=True, expand=True),
         ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
+    # ── Language selector ──────────────────────────────────────
+    _cur_lang = {"v": get_lang()}
+    lang_btn_refs = {}
+
+    def _lang_option(code: str, flag: str, label: str) -> ft.Container:
+        ref = ft.Ref[ft.Container]()
+        lang_btn_refs[code] = ref
+
+        def _select(_):
+            old = _cur_lang["v"]
+            if old == code:
+                return
+            _cur_lang["v"] = code
+            set_lang(code)
+            try:
+                from core.services import AIMemoryService
+                AIMemoryService.remember(user.id, "system", "app_language", code, 1.0)
+            except Exception:
+                pass
+            # Update button borders
+            for c2, r2 in lang_btn_refs.items():
+                if r2.current:
+                    r2.current.border = ft.Border.all(
+                        2, Colors.PRIMARY if c2 == code else Colors.BORDER)
+                    r2.current.bgcolor = Colors.PRIMARY_BG if c2 == code else Colors.BG_SURFACE
+            page.update()
+            # Rebuild settings with new language
+            on_navigate("settings")
+
+        is_active = (_cur_lang["v"] == code)
+        return ft.Container(
+            ref=ref,
+            content=ft.Row([
+                ft.Text(flag, size=22),
+                ft.Column([
+                    ft.Text(label, size=Typography.BODY, color=Colors.TEXT_PRIMARY,
+                            weight=Typography.SEMIBOLD if is_active else Typography.REGULAR),
+                ], spacing=0, tight=True, expand=True),
+                ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED if is_active else ft.Icons.RADIO_BUTTON_UNCHECKED,
+                        size=18, color=Colors.PRIMARY if is_active else Colors.TEXT_MUTED),
+            ], spacing=Spacing.MD, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            padding=ft.padding.symmetric(horizontal=Spacing.MD, vertical=12),
+            border_radius=Radius.MD,
+            bgcolor=Colors.PRIMARY_BG if is_active else Colors.BG_SURFACE,
+            border=ft.Border.all(2, Colors.PRIMARY if is_active else Colors.BORDER),
+            on_click=_select, ink=True,
+            margin=ft.margin.only(bottom=Spacing.XS),
+        )
+
+    lang_section = section_card(t("language"), "🌐",
+        ft.Column([
+            ft.Text(t("language_hint"), size=Typography.TINY, color=Colors.TEXT_MUTED),
+            ft.Container(height=Spacing.SM),
+            _lang_option("vi", "🇻🇳", t("language_vi")),
+            _lang_option("en", "🇬🇧", t("language_en")),
+            _lang_option("zh", "🇨🇳", t("language_zh")),
+        ], spacing=0, tight=True)
+    )
+
     # HEADER
     header = ft.Container(
         content=ft.Row([
             ft.IconButton(ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED, on_click=lambda _: on_navigate("profile")),
-            ft.Text("Cài đặt", size=Typography.H2, color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
+            ft.Text(t("settings_title"), size=Typography.H2, color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
         ]),
         padding=ft.Padding.symmetric(horizontal=Spacing.MD, vertical=Spacing.MD),
     )
@@ -156,7 +216,7 @@ def build_settings_screen(page: ft.Page, user, on_navigate, on_logout):
         header,
         ft.Container(
             content=ft.Column([
-                section_card("Thông tin cơ bản", "👤",
+                section_card(t("account_info"), "👤",
                     ft.Column([
                         ft.Container(
                             content=ft.Column([
@@ -180,21 +240,23 @@ def build_settings_screen(page: ft.Page, user, on_navigate, on_logout):
                             tf_work_end,
                         ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                         ft.Container(height=Spacing.MD),
-                        primary_button("Lưu thay đổi", on_click=save_profile, icon=ft.Icons.SAVE_OUTLINED, height=44),
+                        primary_button(t("save_changes"), on_click=save_profile, icon=ft.Icons.SAVE_OUTLINED, height=44),
                     ], spacing=0, tight=True)
                 ),
                 ft.Container(height=Spacing.SM),
-                section_card("Đổi mật khẩu", "🔒",
+                section_card(t("change_password"), "🔒",
                     ft.Column([
                         tf_old_pwd, ft.Container(height=Spacing.SM), tf_new_pwd, ft.Container(height=Spacing.SM), tf_cfm_pwd, ft.Container(height=Spacing.MD),
-                        primary_button("Đổi mật khẩu", on_click=change_password, icon=ft.Icons.LOCK_RESET_OUTLINED, outlined=True, height=44),
+                        primary_button(t("change_password"), on_click=change_password, icon=ft.Icons.LOCK_RESET_OUTLINED, outlined=True, height=44),
                     ], spacing=0, tight=True)
                 ),
+                ft.Container(height=Spacing.SM),
+                lang_section,
                 ft.Container(height=Spacing.SM),
                 ft.Container(
                     content=ft.Row([
                         ft.Icon(ft.Icons.LOGOUT_ROUNDED, color=Colors.TEXT_MUTED, size=20),
-                        ft.Text("Đăng xuất", size=Typography.BODY, color=Colors.TEXT_MUTED, weight=Typography.SEMIBOLD),
+                        ft.Text(t("logout"), size=Typography.BODY, color=Colors.TEXT_MUTED, weight=Typography.SEMIBOLD),
                     ], alignment=ft.MainAxisAlignment.CENTER, spacing=Spacing.SM),
                     height=48, border_radius=Radius.MD, border=ft.Border.all(1.5, Colors.BORDER),
                     bgcolor=Colors.BG_SURFACE, on_click=do_logout, ink=True,

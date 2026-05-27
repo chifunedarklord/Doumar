@@ -10,9 +10,9 @@ from typing import Optional, List
 from core.orm import (
     SessionLocal, UserModel, SessionModel, TaskModel, ChatSessionModel,
     ChatMessageModel, UserBehaviorModel, WorkSessionModel, AIMemoryModel,
-    AnalyticsCacheModel, ProductivityLogModel, ProjectModel
+    AnalyticsCacheModel, ProductivityLogModel,
 )
-from core.models import User, Task, WorkSession, BehaviorEvent, AIMemory, ProductivityLog, Project
+from core.models import User, Task, WorkSession, BehaviorEvent, AIMemory, ProductivityLog
 
 class Storage:
     """SQLAlchemy Repository Facade — Maintains backwards compatibility."""
@@ -376,46 +376,3 @@ class Storage:
             try: return json.loads(m.metric_value)
             except: return m.metric_value
 
-    # ── Projects ───────────────────────────────────────────────────────────────
-    @classmethod
-    def get_projects(cls, user_id: str) -> list:
-        with SessionLocal() as db:
-            rows = db.query(ProjectModel).filter(
-                ProjectModel.user_id == user_id
-            ).order_by(ProjectModel.updated_at.desc()).all()
-            result = []
-            for r in rows:
-                try:
-                    result.append(Project(
-                        id=r.id, user_id=r.user_id, name=r.name,
-                        description=r.description or "", color=r.color or "#5B4FBE",
-                        status=r.status or "active", priority=r.priority or "medium",
-                        due_date=r.due_date, created_at=r.created_at, updated_at=r.updated_at,
-                    ))
-                except Exception:
-                    pass
-            return result
-
-    @classmethod
-    def save_project(cls, project) -> None:
-        with SessionLocal() as db:
-            existing = db.query(ProjectModel).filter(ProjectModel.id == project.id).first()
-            if existing:
-                for f in ["name", "description", "color", "status", "priority",
-                          "due_date", "updated_at"]:
-                    setattr(existing, f, getattr(project, f, None))
-            else:
-                db.add(ProjectModel(
-                    id=project.id, user_id=project.user_id, name=project.name,
-                    description=project.description, color=project.color,
-                    status=project.status, priority=project.priority,
-                    due_date=project.due_date, created_at=project.created_at,
-                    updated_at=project.updated_at,
-                ))
-            db.commit()
-
-    @classmethod
-    def delete_project(cls, project_id: str) -> None:
-        with SessionLocal() as db:
-            db.query(ProjectModel).filter(ProjectModel.id == project_id).delete()
-            db.commit()

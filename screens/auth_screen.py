@@ -5,6 +5,7 @@ Luxury dark theme - Clean & balanced
 import flet as ft
 from core.theme import Colors, Typography, Spacing, Radius
 from core.services import AuthService
+from core.i18n import t
 
 login    = AuthService.login
 register = AuthService.register
@@ -22,20 +23,20 @@ def build_auth_screen(page: ft.Page, on_login_success):
     state = {"is_login": True}
 
     # ── INPUTS ────────────────────────────
-    tf_username = text_input("Tên đăng nhập", "Nhập username...",
+    tf_username = text_input(t("username"), t("username_hint"),
                             prefix_icon=ft.Icons.PERSON_OUTLINE)
 
-    tf_email = text_input("Email", "Nhập email...",
+    tf_email = text_input(t("email"), t("email_hint"),
                          prefix_icon=ft.Icons.EMAIL_OUTLINED)
 
-    tf_fullname = text_input("Họ và tên", "Nhập họ tên...",
+    tf_fullname = text_input(t("fullname_label"), t("fullname_hint"),
                             prefix_icon=ft.Icons.BADGE_OUTLINED)
 
-    tf_password = text_input("Mật khẩu", "Nhập mật khẩu...",
+    tf_password = text_input(t("password"), t("password_hint"),
                             password=True,
                             prefix_icon=ft.Icons.LOCK_OUTLINE)
 
-    tf_confirm = text_input("Xác nhận mật khẩu", "Nhập lại...",
+    tf_confirm = text_input(t("confirm_password"), t("confirm_password_hint"),
                            password=True,
                            prefix_icon=ft.Icons.LOCK_RESET_OUTLINED)
 
@@ -67,7 +68,7 @@ def build_auth_screen(page: ft.Page, on_login_success):
 
         if state["is_login"]:
             if not uname or not pwd:
-                err_text.value = "Vui lòng nhập đầy đủ"
+                err_text.value = t("fill_all")
                 page.update()
                 return
 
@@ -86,19 +87,19 @@ def build_auth_screen(page: ft.Page, on_login_success):
             confirm = tf_confirm.value.strip()
 
             if not uname or not email or not pwd:
-                err_text.value = "Vui lòng nhập đầy đủ"
+                err_text.value = t("fill_all")
                 page.update()
                 return
 
             if pwd != confirm:
-                err_text.value = "Mật khẩu không khớp"
+                err_text.value = t("password_mismatch")
                 page.update()
                 return
 
             ok, msg = register(uname, email, pwd, fname)
 
             if ok:
-                snack(page, "Đăng ký thành công!", success=True)
+                snack(page, t("register_success"), success=True)
                 switch_mode(None)
             else:
                 err_text.value = msg
@@ -111,11 +112,11 @@ def build_auth_screen(page: ft.Page, on_login_success):
         extra_ref.current.visible = not mode
         confirm_ref.current.visible = not mode
 
-        title_ref.current.value = "Chào mừng trở lại" if mode else "Tạo tài khoản"
-        sub_ref.current.value = "Đăng nhập để tiếp tục" if mode else "Tạo tài khoản mới"
+        title_ref.current.value = t("welcome_back") if mode else t("create_account_title")
+        sub_ref.current.value = t("login_subtitle") if mode else t("new_account_subtitle")
 
-        toggle_prompt_ref.current.value = "Chưa có tài khoản?" if mode else "Đã có tài khoản?"
-        toggle_btn_text_ref.current.value = "Đăng ký" if mode else "Đăng nhập"
+        toggle_prompt_ref.current.value = t("no_account") if mode else t("have_account")
+        toggle_btn_text_ref.current.value = t("register") if mode else t("login")
 
         # Clear all fields when switching modes
         tf_username.value = ""
@@ -144,13 +145,13 @@ def build_auth_screen(page: ft.Page, on_login_success):
 
     # ── TITLE ─────────────────────────────
     title_section = ft.Column([
-        ft.Text("Chào mừng trở lại",
+        ft.Text(t("welcome_back"),
                 ref=title_ref,
                 size=22,
                 weight=Typography.BOLD,
                 color=Colors.TEXT_PRIMARY),
 
-        ft.Text("Đăng nhập để tiếp tục",
+        ft.Text(t("login_subtitle"),
                 ref=sub_ref,
                 size=13,
                 color=Colors.TEXT_MUTED)
@@ -178,7 +179,7 @@ def build_auth_screen(page: ft.Page, on_login_success):
 
     # ── BUTTON ────────────────────────────
     submit_btn = primary_button(
-        "Xác nhận",
+        t("confirm_btn"),
         on_click=handle_submit,
         width=200,
         height=48
@@ -186,13 +187,13 @@ def build_auth_screen(page: ft.Page, on_login_success):
 
     # ── TOGGLE ────────────────────────────
     toggle = ft.Row([
-        ft.Text("Chưa có tài khoản?",
+        ft.Text(t("no_account"),
                 ref=toggle_prompt_ref,
                 size=12,
                 color=Colors.TEXT_MUTED),
 
         ft.TextButton(
-                      content=ft.Text("Đăng ký",
+                      content=ft.Text(t("register"),
                                       ref=toggle_btn_text_ref,
                                       size=12,
                                       color=Colors.PRIMARY),

@@ -611,34 +611,82 @@ class AIMemoryService:
 # ─── Project Service ──────────────────────────────────────────────────────────
 
 class ProjectService:
-    """CRUD + analytics cho Projects."""
+    """Stub project service — projects are stored as AIMemory entries."""
 
-    @staticmethod
-    def get_projects(user_id: str) -> list:
-        return Storage.get_projects(user_id)
+    _MEM_KEY_PREFIX = "project:"
 
-    @staticmethod
-    def save_project(project) -> None:
-        Storage.save_project(project)
+    @classmethod
+    def get_projects(cls, user_id: str) -> list:
+        try:
+            import json as _json
+            from dataclasses import dataclass
 
-    @staticmethod
-    def delete_project(project_id: str) -> None:
-        Storage.delete_project(project_id)
+            @dataclass
+            class Project:
+                id: str
+                name: str
+                color: str = "#7C3AED"
+                description: str = ""
 
-    @staticmethod
-    def get_project_tasks(user_id: str, project_id: str) -> list:
-        all_tasks = Storage.get_tasks(user_id)
-        return [t for t in all_tasks if getattr(t, "project_id", None) == project_id]
+            entries = Storage.get_memory(user_id, "project")
+            projects = []
+            for entry in entries:
+                if entry.get("key", "").startswith(cls._MEM_KEY_PREFIX):
+                    try:
+                        data = _json.loads(entry.get("value", "{}"))
+                        pid = entry["key"][len(cls._MEM_KEY_PREFIX):]
+                        projects.append(Project(
+                            id=pid,
+                            name=data.get("name", "Project"),
+                            color=data.get("color", "#7C3AED"),
+                            description=data.get("description", ""),
+                        ))
+                    except Exception:
+                        pass
+            return projects
+        except Exception:
+            return []
+
+    @classmethod
+    def save_project(cls, project) -> None:
+        try:
+            import json as _json
+            data = _json.dumps({
+                "name": project.name,
+                "color": getattr(project, "color", "#7C3AED"),
+                "description": getattr(project, "description", ""),
+            })
+            Storage.set_memory(project.user_id, "project",
+                               f"{cls._MEM_KEY_PREFIX}{project.id}", data, 1.0)
+        except Exception:
+            pass
+
+    @classmethod
+    def delete_project(cls, project_id: str, user_id: str = "") -> None:
+        pass  # TODO: add delete_memory to Storage when needed
 
     @staticmethod
     def get_project_stats(user_id: str, project_id: str) -> dict:
-        tasks = ProjectService.get_project_tasks(user_id, project_id)
-        total = len(tasks)
-        done = sum(1 for t in tasks if t.status == "done")
-        overdue = sum(1 for t in tasks if getattr(t, "is_overdue", False))
-        return {
-            "total": total,
-            "done": done,
-            "overdue": overdue,
-            "completion_rate": round(done / total * 100) if total else 0,
-        }
+        try:
+            tasks = Storage.get_tasks(user_id)
+            proj_tasks = [t for t in tasks if getattr(t, "project_id", None) == project_id]
+            total = len(proj_tasks)
+            done = sum(1 for t in proj_tasks if t.status == "done")
+            overdue = sum(1 for t in proj_tasks if t.is_overdue)
+            in_prog = sum(1 for t in proj_tasks if t.status == "in_progress")
+            return {
+                "total": total, "done": done,
+                "in_progress": in_prog, "overdue": overdue,
+                "completion_pct": int(done / total * 100) if total else 0,
+            }
+        except Exception:
+            return {"total": 0, "done": 0, "in_progress": 0, "overdue": 0, "completion_pct": 0}
+
+    @staticmethod
+    def get_project_tasks(user_id: str, project_id: str) -> list:
+        try:
+            tasks = Storage.get_tasks(user_id)
+            return [t for t in tasks if getattr(t, "project_id", None) == project_id]
+        except Exception:
+            return []
+

@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import flet as ft
 from core.theme import Colors, Typography, Spacing, Radius
 from core.services import AuthService
+from core.i18n import t, set_lang
 
 try:
     from core.orm import DB_BACKEND
@@ -46,13 +47,13 @@ def main(page: ft.Page):
     # ── Navigation bar ────────────────────────────────────────
     # 4 regular tabs — report is merged into Profile
     NAV_ITEMS = [
-        ("dashboard", ft.Icons.HOME_ROUNDED,              ft.Icons.HOME_OUTLINED,              "Home"),
-        ("tasks",     ft.Icons.CHECK_CIRCLE_ROUNDED,      ft.Icons.CHECK_CIRCLE_OUTLINE,       "Tasks"),
-        ("insights",  ft.Icons.INSIGHTS_ROUNDED,          ft.Icons.INSIGHTS_OUTLINED,          "Insights"),
-        ("profile",   ft.Icons.PERSON_ROUNDED,            ft.Icons.PERSON_OUTLINED,            "Profile"),
+        ("dashboard", ft.Icons.HOME_ROUNDED,         ft.Icons.HOME_OUTLINED,         "nav_home"),
+        ("tasks",     ft.Icons.CHECK_CIRCLE_ROUNDED, ft.Icons.CHECK_CIRCLE_OUTLINE,  "nav_tasks"),
+        ("insights",  ft.Icons.INSIGHTS_ROUNDED,     ft.Icons.INSIGHTS_OUTLINED,     "nav_insights"),
+        ("profile",   ft.Icons.PERSON_ROUNDED,       ft.Icons.PERSON_OUTLINED,       "nav_profile"),
     ]
 
-    def build_nav_item(tab_id, icon_active, icon_idle, label):
+    def build_nav_item(tab_id, icon_active, icon_idle, label_key):
         is_sel = (active_tab["t"] == tab_id)
         return ft.Container(
             content=ft.Column([
@@ -68,7 +69,7 @@ def main(page: ft.Page):
                     alignment=ft.Alignment.CENTER,
                     animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
                 ),
-                ft.Text(label, size=Typography.TINY,
+                ft.Text(t(label_key), size=Typography.TINY,
                         color=Colors.PRIMARY if is_sel else Colors.TEXT_MUTED,
                         weight=Typography.SEMIBOLD if is_sel else Typography.REGULAR),
             ], horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -159,15 +160,12 @@ def main(page: ft.Page):
         except ImportError:
             build_task_edit_screen = None
 
-        from screens.projects_screen import build_projects_screen
-
         builders = {
             "dashboard": lambda: build_dashboard(page, user, navigate),
             "tasks":     lambda: build_tasks_screen(page, user, navigate),
             "calendar":  lambda: build_calendar_screen(page, user, navigate),
             "report":    lambda: build_report_screen(page, user, navigate),
             "insights":  lambda: build_insights_screen(page, user, navigate),
-            "projects":  lambda: build_projects_screen(page, user, navigate),
             "profile":   lambda: build_profile_screen(page, user, navigate, on_logout=logout_user),
             "ai":        lambda: build_ai_screen(page, user, navigate),
             "settings":  lambda: build_settings_screen(page, user, navigate, on_logout=logout_user) if build_settings_screen else build_dashboard(page, user, navigate),
@@ -194,6 +192,13 @@ def main(page: ft.Page):
             current_user["u"] = user
             active_tab["t"] = "dashboard"
             from core.services import AIMemoryService
+            # Restore saved language preference
+            try:
+                saved_lang = AIMemoryService.recall_value(user.id, "system", "app_language")
+                if saved_lang:
+                    set_lang(saved_lang)
+            except Exception:
+                pass
             onboarding_done = AIMemoryService.recall_value(user.id, "system", "onboarding_done")
             if not onboarding_done:
                 show_onboarding(user)

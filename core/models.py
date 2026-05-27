@@ -109,16 +109,17 @@ class Task:
 
     @property
     def due_date_display(self) -> str:
+        from core.i18n import t as _t
         if not self.due_date:
-            return "Không có hạn"
+            return _t("no_due_date")
         d = date.fromisoformat(self.due_date)
         today = date.today()
         diff = (d - today).days
-        if diff == 0:   return "Hôm nay"
-        if diff == 1:   return "Ngày mai"
-        if diff == -1:  return "Hôm qua"
-        if diff < 0:    return f"Quá hạn {abs(diff)} ngày"
-        if diff <= 7:   return f"{diff} ngày nữa"
+        if diff == 0:   return _t("due_today_display")
+        if diff == 1:   return _t("due_tomorrow_display")
+        if diff == -1:  return _t("due_yesterday_display")
+        if diff < 0:    return _t("overdue_days", n=abs(diff))
+        if diff <= 7:   return _t("days_left", n=diff)
         return d.strftime("%d/%m/%Y")
 
     @property
@@ -204,34 +205,3 @@ class ProductivityLog:
     def to_dict(self):
         return asdict(self)
 
-
-# ─── Project ──────────────────────────────────────────────────────────────────
-
-@dataclass
-class Project:
-    """Nhóm task theo du an / muc tieu lon."""
-    id: str
-    user_id: str
-    name: str
-    description: str = ""
-    color: str = "#5B4FBE"
-    status: str = "active"            # active / completed / paused
-    priority: str = "medium"
-    due_date: Optional[str] = None
-    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
-    updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
-
-    def to_dict(self):
-        return asdict(self)
-
-    @staticmethod
-    def from_dict(d: dict) -> "Project":
-        import dataclasses
-        valid_keys = {f.name for f in dataclasses.fields(Project)}
-        return Project(**{k: v for k, v in d.items() if k in valid_keys})
-
-    @property
-    def is_overdue(self) -> bool:
-        if self.due_date and self.status != "completed":
-            return date.fromisoformat(self.due_date) < date.today()
-        return False

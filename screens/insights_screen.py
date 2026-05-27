@@ -8,6 +8,7 @@ from collections import defaultdict
 
 from core.theme import Colors, Typography, Spacing, Radius
 from core.services import AnalyticsService
+from core.i18n import t, weekdays
 from components.widgets import section_header, stat_card, primary_divider
 
 
@@ -46,16 +47,21 @@ def build_insights_screen(page: ft.Page, user, on_navigate):
         _tasks_all = _TS.get_tasks(user.id)
         _today_str = _date.today().isoformat()
         _total = len(_tasks_all)
-        _done  = sum(1 for t in _tasks_all if t.status == "done")
-        _overdue = sum(1 for t in _tasks_all if t.is_overdue)
-        _today_cnt = sum(1 for t in _tasks_all
-                         if t.due_date == _today_str and t.status != "done")
+        _done  = sum(1 for tk in _tasks_all if tk.status == "done")
+        _overdue = sum(1 for tk in _tasks_all if tk.is_overdue)
+        _today_cnt = sum(1 for tk in _tasks_all
+                         if tk.due_date == _today_str and tk.status != "done")
         _focus_mins = report.get("total_focus_minutes", 0)
 
         return ft.Column([
             _build_header(user),
             ft.Container(
                 content=ft.Column([
+                    # AI comment card (top of insights)
+                    _build_ai_comment_card(_total, _done, _overdue, _today_cnt,
+                                           _focus_mins, peak_hrs, weekly_score, energy,
+                                           stress, report.get("optimal_pomodoro", {})),
+                    ft.Container(height=Spacing.MD),
                     # Quick summary
                     _build_quick_summary(_total, _done, _overdue, _today_cnt, _focus_mins),
                     ft.Container(height=Spacing.MD),
@@ -120,9 +126,9 @@ def _build_header(user):
     return ft.Container(
         content=ft.Row([
             ft.Column([
-                ft.Text("AI Insights", size=Typography.H2,
+                ft.Text(t("insights_title"), size=Typography.H2,
                         color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
-                ft.Text("Phân tích thông minh từ hành vi thực tế",
+                ft.Text(t("insights_subtitle"),
                         size=Typography.TINY, color=Colors.TEXT_MUTED),
             ], spacing=2, tight=True),
             ft.Row([], expand=True),
@@ -167,9 +173,9 @@ def _build_status_trio(weekly_score, energy, stress):
         )
 
     return ft.Row([
-        metric_card("Năng suất", int(weekly_score), score_color, "📊", "/100"),
+        metric_card(t("weekly_score"), int(weekly_score), score_color, "📊", "/100"),
         ft.Container(width=Spacing.SM),
-        metric_card("Năng lượng", energy, energy_color, "⚡", "/10"),
+        metric_card(t("checkin_energy_label").replace("⚡ ", ""), energy, energy_color, "⚡", "/10"),
         ft.Container(width=Spacing.SM),
         metric_card("Stress", stress, stress_color, "🧠", "/10"),
     ], spacing=0)
@@ -218,7 +224,7 @@ def _build_burnout_card(burnout: dict):
                 ], spacing=Spacing.XS) for r in reasons[:3]]
                 if reasons else
                 [ft.Container(height=Spacing.SM),
-                 ft.Text("✅ Không có dấu hiệu kiệt sức", size=Typography.SMALL, color=Colors.SUCCESS)]
+                 ft.Text(t("working_well"), size=Typography.SMALL, color=Colors.SUCCESS)]
             ),
             *(
                 [ft.Container(height=Spacing.SM),
@@ -241,7 +247,7 @@ def _build_recommendations(recs: list, on_navigate, user=None, page=None):
         return ft.Container(
             content=ft.Row([
                 ft.Text("🎉", size=20),
-                ft.Text("Không có gợi ý đặc biệt! Bạn đang làm rất tốt.",
+                ft.Text(t("no_special_suggestions"),
                         size=Typography.SMALL, color=Colors.SUCCESS),
             ], spacing=Spacing.SM),
             padding=Spacing.MD, border_radius=Radius.LG,
@@ -288,7 +294,7 @@ def _build_recommendations(recs: list, on_navigate, user=None, page=None):
                 ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 ft.Row([
                     ft.TextButton(
-                        "✓ Đã làm",
+                        t("done_action"),
                         on_click=lambda e: _feedback(True, e),
                         style=ft.ButtonStyle(
                             color=Colors.SUCCESS,
@@ -296,7 +302,7 @@ def _build_recommendations(recs: list, on_navigate, user=None, page=None):
                         ),
                     ),
                     ft.TextButton(
-                        "✗ Bỏ qua",
+                        t("dismiss_action"),
                         on_click=lambda e: _feedback(False, e),
                         style=ft.ButtonStyle(
                             color=Colors.TEXT_MUTED,
@@ -315,7 +321,7 @@ def _build_recommendations(recs: list, on_navigate, user=None, page=None):
 
     return ft.Column([
         section_header("🤖 AI Recommendations",
-                        f"{len(recs)} gợi ý thực tế"),
+                        t("suggestions_count", n=len(recs))),
         ft.Container(height=Spacing.SM),
         ft.Column([rec_card(r) for r in recs], spacing=0, tight=True),
     ], spacing=0, tight=True)
@@ -340,10 +346,10 @@ def _build_focus_heatmap(heatmap: dict, peak_hrs: list):
         ], horizontal_alignment=ft.CrossAxisAlignment.CENTER,
            spacing=2, tight=True))
 
-    peak_str = ", ".join(f"{h:02d}h" for h in peak_hrs) if peak_hrs else "Chưa học được"
+    peak_str = ", ".join(f"{h:02d}h" for h in peak_hrs) if peak_hrs else t("not_learned_yet")
     return ft.Container(
         content=ft.Column([
-            section_header("⚡ Focus Heatmap 24 giờ",
+            section_header(f"⚡ {t('focus_heatmap_title')}",
                            f"Peak hours: {peak_str}"),
             ft.Container(height=Spacing.SM),
             ft.Container(
@@ -353,10 +359,10 @@ def _build_focus_heatmap(heatmap: dict, peak_hrs: list):
             ),
             ft.Row([
                 ft.Container(width=10, height=10, border_radius=2, bgcolor=Colors.PRIMARY),
-                ft.Text("Peak hour", size=Typography.TINY, color=Colors.TEXT_MUTED),
+                ft.Text(t("peak_hour"), size=Typography.TINY, color=Colors.TEXT_MUTED),
                 ft.Container(width=Spacing.MD),
                 ft.Container(width=10, height=10, border_radius=2, bgcolor=Colors.SUCCESS),
-                ft.Text("Focus tinggi", size=Typography.TINY, color=Colors.TEXT_MUTED),
+                ft.Text(t("high_focus"), size=Typography.TINY, color=Colors.TEXT_MUTED),
             ], spacing=Spacing.XS),
         ], spacing=0, tight=True),
         padding=Spacing.MD, border_radius=Radius.LG,
@@ -394,7 +400,7 @@ def _build_daily_chart(daily_prod: list):
 
     return ft.Container(
         content=ft.Column([
-            section_header("📅 Hoạt động 7 ngày", "Xanh=hoàn thành · Đỏ=delay"),
+            section_header(t("activity_7days"), t("activity_7days_legend")),
             ft.Container(height=Spacing.SM),
             ft.Row(bars, spacing=4, alignment=ft.MainAxisAlignment.SPACE_AROUND,
                    vertical_alignment=ft.CrossAxisAlignment.END),
@@ -429,12 +435,12 @@ def _build_trends(trends: dict):
     return ft.Container(
         content=ft.Column([
             ft.Row([
-                ft.Text("📊 Xu hướng 4 tuần", size=Typography.H4,
+                ft.Text(f"📊 {t('trends_4w_title')}", size=Typography.H4,
                         color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
                 ft.Row([], expand=True),
                 ft.Text(trend_icon, size=16),
                 ft.Text(
-                    "Đang tốt lên" if trend == "up" else "Đang giảm" if trend == "down" else "Ổn định",
+                    t("trend_up") if trend == "up" else t("trend_down") if trend == "down" else t("trend_stable"),
                     size=Typography.TINY, color=trend_color,
                 ),
             ], spacing=Spacing.XS, vertical_alignment=ft.CrossAxisAlignment.CENTER),
@@ -457,15 +463,15 @@ def _build_focus_stats(focus: dict, pomodoro: dict):
     pomo_break = pomodoro.get("break_minutes", 5)
     pomo_source = pomodoro.get("source", "default")
 
-    trend_text = "📈 Đang cải thiện" if trend == "improving" else "📉 Đang giảm" if trend == "declining" else "➡️ Ổn định"
+    trend_text = f"📈 {t('trend_improving')}" if trend == "improving" else f"📉 {t('trend_down')}" if trend == "declining" else f"➡️ {t('trend_stable')}"
     trend_color = Colors.SUCCESS if trend == "improving" else Colors.ERROR if trend == "declining" else Colors.TEXT_MUTED
 
     return ft.Container(
         content=ft.Column([
-            section_header("🎯 Focus Analytics", f"Tổng: {total_h:.1f}h"),
+            section_header("🎯 Focus Analytics", t("focus_total_h", h=f"{total_h:.1f}")),
             ft.Container(height=Spacing.SM),
             ft.Row([
-                _mini_metric("Chất lượng TB", f"{quality:.1f}/10", Colors.PRIMARY),
+                _mini_metric(t("avg_quality"), f"{quality:.1f}/10", Colors.PRIMARY),
                 _mini_metric("Deep Work", f"{deep_ratio*100:.0f}%",
                              Colors.SUCCESS if deep_ratio > 0.4 else Colors.WARNING),
                 _mini_metric("Trend", trend_text, trend_color),
@@ -475,11 +481,11 @@ def _build_focus_stats(focus: dict, pomodoro: dict):
                 content=ft.Row([
                     ft.Text("⏱️", size=14),
                     ft.Column([
-                        ft.Text(f"Pomodoro tối ưu của bạn: {pomo_work} phút làm — {pomo_break} phút nghỉ",
+                        ft.Text(t("pomodoro_optimal", work=pomo_work, break_=pomo_break),
                                 size=Typography.SMALL, color=Colors.TEXT_PRIMARY,
                                 weight=Typography.MEDIUM),
                         ft.Text(
-                            "Được học từ work sessions thực tế" if pomo_source == "learned" else "Mặc định Pomodoro",
+                            t("pomodoro_learned") if pomo_source == "learned" else t("pomodoro_default"),
                             size=Typography.TINY, color=Colors.TEXT_MUTED,
                         ),
                     ], spacing=1, tight=True, expand=True),
@@ -527,7 +533,7 @@ def _build_category_performance(cat_perf: list):
 
     return ft.Container(
         content=ft.Column([
-            section_header("📊 Hiệu suất theo danh mục", f"{len(cat_perf)} danh mục"),
+            section_header(f"📊 {t('cat_perf_title')}", t("categories_count", n=len(cat_perf))),
             ft.Container(height=Spacing.SM),
             ft.Column([cat_row(p) for p in cat_perf[:5]], spacing=0, tight=True),
         ], spacing=0, tight=True),
@@ -590,7 +596,7 @@ def _build_deadline_compliance(compliance: dict):
         return ft.Container(
             content=ft.Row([
                 ft.Text("📋", size=16),
-                ft.Text("Chưa đủ dữ liệu về deadline compliance",
+                ft.Text(t("no_deadline_data"),
                         size=Typography.SMALL, color=Colors.TEXT_MUTED),
             ], spacing=Spacing.SM),
             padding=Spacing.MD, border_radius=Radius.LG,
@@ -626,11 +632,11 @@ def _build_deadline_compliance(compliance: dict):
             ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ft.Container(height=Spacing.SM),
             ft.Row([
-                _mini_metric("Đúng hạn", str(on_time), Colors.SUCCESS),
+                _mini_metric(t("on_time"), str(on_time), Colors.SUCCESS),
                 ft.Container(width=Spacing.SM),
-                _mini_metric("Trễ hạn", str(late), Colors.ERROR),
+                _mini_metric(t("late_label"), str(late), Colors.ERROR),
                 ft.Container(width=Spacing.SM),
-                _mini_metric("Tổng mẫu", str(samples), Colors.TEXT_MUTED),
+                _mini_metric(t("total_samples"), str(samples), Colors.TEXT_MUTED),
             ], spacing=0),
             *(
                 [ft.Container(height=Spacing.SM),
@@ -656,7 +662,7 @@ def _build_estimation_accuracy(estimation: dict):
         return ft.Container(
             content=ft.Row([
                 ft.Text("⏱️", size=16),
-                ft.Text("Chưa đủ dữ liệu về estimation accuracy",
+                ft.Text(t("no_estimation_data"),
                         size=Typography.SMALL, color=Colors.TEXT_MUTED),
             ], spacing=Spacing.SM),
             padding=Spacing.MD, border_radius=Radius.LG,
@@ -665,10 +671,10 @@ def _build_estimation_accuracy(estimation: dict):
 
     tendency_map = {
         "underestimate": ("⬆️ Underestimate", Colors.WARNING,
-                          f"Thực tế lâu hơn {abs(error_pct):.0f}% so với ước tính"),
+                          t("underestimate_desc", pct=int(abs(error_pct)))),
         "overestimate": ("⬇️ Overestimate", Colors.PRIMARY,
-                         f"Thực tế ngắn hơn {abs(error_pct):.0f}% so với ước tính"),
-        "accurate": ("✅ Chính xác", Colors.SUCCESS, "Ước tính khá sát với thực tế"),
+                         t("overestimate_desc", pct=int(abs(error_pct)))),
+        "accurate": ("✅ Accurate", Colors.SUCCESS, t("accurate_desc")),
     }
     label, t_color, desc = tendency_map.get(tendency, tendency_map["accurate"])
 
@@ -708,11 +714,11 @@ def _build_estimation_accuracy(estimation: dict):
             ),
             *(
                 [ft.Container(height=Spacing.SM),
-                 ft.Text("Theo danh mục:", size=Typography.TINY, color=Colors.TEXT_MUTED),
+                 ft.Text(t("by_category_label"), size=Typography.TINY, color=Colors.TEXT_MUTED),
                  ft.Column(cat_rows, spacing=4, tight=True)]
                 if cat_rows else []
             ),
-            ft.Text(f"Từ {samples} task đã hoàn thành", size=7, color=Colors.TEXT_MUTED),
+            ft.Text(t("from_completed_tasks", n=samples), size=7, color=Colors.TEXT_MUTED),
         ], spacing=4, tight=True),
         padding=Spacing.MD, border_radius=Radius.LG,
         bgcolor=Colors.BG_CARD, border=ft.Border.all(1, Colors.BORDER),
@@ -732,7 +738,7 @@ def _build_procrastination_card(procrastinate: dict, workload: dict):
     weekly_load = workload.get("weekly_load", 0)
 
     p_color = Colors.ERROR if p_score >= 60 else Colors.WARNING if p_score >= 30 else Colors.SUCCESS
-    p_label = "Cao" if p_score >= 60 else "Trung bình" if p_score >= 30 else "Thấp"
+    p_label = t("p_level_high") if p_score >= 60 else t("p_level_medium") if p_score >= 30 else t("p_level_low")
 
     risk_chips = []
     for item in high_risk:
@@ -754,16 +760,16 @@ def _build_procrastination_card(procrastinate: dict, workload: dict):
             ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ft.Container(height=Spacing.SM),
             ft.Row([
-                _mini_metric("Trì hoãn", p_label, p_color),
+                _mini_metric(t("procrastination_level"), p_label, p_color),
                 ft.Container(width=Spacing.SM),
-                _mini_metric("Đã delay", str(total_delays), Colors.WARNING),
+                _mini_metric(t("delayed_count"), str(total_delays), Colors.WARNING),
                 ft.Container(width=Spacing.SM),
-                _mini_metric("7 ngày tới", str(weekly_load), Colors.PRIMARY),
+                _mini_metric(t("next_7_days"), str(weekly_load), Colors.PRIMARY),
             ], spacing=0),
             *(
                 [ft.Container(height=Spacing.SM),
                  ft.Row([
-                     ft.Text("Danh mục hay trì hoãn:", size=Typography.TINY,
+                     ft.Text(t("procrastinate_categories"), size=Typography.TINY,
                              color=Colors.TEXT_MUTED),
                  ] + risk_chips, spacing=Spacing.XS,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -773,7 +779,7 @@ def _build_procrastination_card(procrastinate: dict, workload: dict):
             *(
                 [ft.Container(
                     content=ft.Text(
-                        f"💡 Hay trì hoãn vào buổi {worst_time} — thử làm trước.",
+                        t("procrastinate_time_tip", time=worst_time),
                         size=Typography.TINY, color="#92400E",
                     ),
                     padding=ft.padding.symmetric(horizontal=Spacing.SM, vertical=6),
@@ -785,7 +791,7 @@ def _build_procrastination_card(procrastinate: dict, workload: dict):
             *(
                 [ft.Container(
                     content=ft.Text(
-                        f"📦 Workload quá tải: {weekly_load} task/7 ngày — nên rải deadline.",
+                        t("workload_overload", n=weekly_load),
                         size=Typography.TINY, color=Colors.ERROR,
                     ),
                     padding=ft.padding.symmetric(horizontal=Spacing.SM, vertical=6),
@@ -815,10 +821,10 @@ def _build_quick_summary(total: int, done: int, overdue: int,
     today_color = Colors.PRIMARY if today_cnt > 0 else Colors.SUCCESS
 
     # Actionable tips per metric
-    rate_tip  = "Tiếp tục duy trì!" if completion_rate >= 70 else "Tập trung hoàn thành task tồn đọng."
-    over_tip  = "Không có task quá hạn!" if overdue == 0 else f"Giải quyết {overdue} task quá hạn ngay."
-    today_tip = "Không có task hôm nay!" if today_cnt == 0 else f"{today_cnt} task cần xong hôm nay."
-    focus_tip = "Chưa có phiên Focus." if focus_mins == 0 else "Tăng dần thời gian mỗi ngày."
+    rate_tip  = t("rate_tip_good") if completion_rate >= 70 else t("rate_tip_bad")
+    over_tip  = t("no_overdue_task") if overdue == 0 else t("resolve_overdue", n=overdue)
+    today_tip = t("no_today_tasks") if today_cnt == 0 else t("tasks_due_today", n=today_cnt)
+    focus_tip = t("no_focus_yet") if focus_mins == 0 else t("increase_focus_daily")
 
     def _stat_col(icon, value, label, color, tip):
         return ft.Column([
@@ -840,21 +846,154 @@ def _build_quick_summary(total: int, done: int, overdue: int,
         content=ft.Column([
             ft.Row([
                 ft.Text("📈", size=16),
-                ft.Text("Tổng quan hôm nay", size=Typography.H4,
+                ft.Text(t("quick_summary_title"), size=Typography.H4,
                         color=Colors.TEXT_PRIMARY, weight=ft.FontWeight.BOLD, expand=True),
             ], spacing=Spacing.SM),
             ft.Container(height=Spacing.SM),
             ft.Row([
-                _stat_col("✅", f"{completion_rate}%",  "Hoàn thành", rate_color,  rate_tip),
-                _stat_col("⚠️", str(overdue),           "Quá hạn",    over_color,  over_tip),
-                _stat_col("📅", str(today_cnt),         "Hôm nay",    today_color, today_tip),
-                _stat_col("🎯", focus_str,              "Focus",      Colors.PRIMARY, focus_tip),
+                _stat_col("✅", f"{completion_rate}%",  t("done_stat"),     rate_color,  rate_tip),
+                _stat_col("⚠️", str(overdue),           t("overdue_stat"),  over_color,  over_tip),
+                _stat_col("📅", str(today_cnt),         t("today"),         today_color, today_tip),
+                _stat_col("🎯", focus_str,              "Focus",            Colors.PRIMARY, focus_tip),
             ], spacing=Spacing.SM),
         ], spacing=0, tight=True),
         padding=Spacing.MD, border_radius=Radius.LG,
         bgcolor=Colors.BG_CARD,
         border=ft.Border.all(1, Colors.BORDER),
         shadow=ft.BoxShadow(blur_radius=12, color="#00000018", offset=ft.Offset(0, 3)),
+    )
+
+
+def _build_ai_comment_card(total, done, overdue, today_cnt, focus_mins,
+                           peak_hrs, weekly_score, energy, stress,
+                           pomodoro: dict) -> ft.Container:
+    """Card 'AI nhận xét hôm nay' — tóm tắt tiếng Việt dễ hiểu."""
+    from datetime import datetime as _dt
+
+    # ── Completion rate ──────────────────────────────────────
+    rate = int(done / total * 100) if total else 0
+    if rate >= 80:
+        rate_txt = t("rate_txt_excellent", rate=rate)
+        rate_color = Colors.SUCCESS
+    elif rate >= 50:
+        rate_txt = t("rate_txt_good", rate=rate)
+        rate_color = Colors.PRIMARY
+    elif rate >= 20:
+        rate_txt = t("rate_txt_medium", remaining=100-rate)
+        rate_color = Colors.WARNING
+    else:
+        rate_txt = t("rate_txt_low", rate=rate)
+        rate_color = Colors.ERROR
+
+    # ── Overdue ───────────────────────────────────────────────
+    if overdue == 0:
+        overdue_txt = t("overdue_none")
+    elif overdue <= 2:
+        overdue_txt = t("overdue_few", n=overdue)
+    else:
+        overdue_txt = t("overdue_many", n=overdue)
+
+    # ── Peak hours ────────────────────────────────────────────
+    now_hour = _dt.now().hour
+    if peak_hrs:
+        peak_str = ", ".join(f"{h:02d}h" for h in sorted(peak_hrs)[:3])
+        if now_hour in peak_hrs:
+            time_txt = t("peak_now", hours=peak_str)
+        elif now_hour < min(peak_hrs):
+            time_txt = t("peak_coming", hours=peak_str)
+        else:
+            time_txt = t("peak_passed", hours=peak_str)
+    else:
+        time_txt = t("peak_no_data")
+
+    # ── Focus ─────────────────────────────────────────────────
+    focus_h = focus_mins // 60
+    focus_m = focus_mins % 60
+    focus_str = f"{focus_h}h{focus_m:02d}m" if focus_h else f"{focus_mins}m"
+    pomo_mins = pomodoro.get("work_minutes", 25)
+    if focus_mins == 0:
+        focus_txt = t("focus_none_msg", pomo=pomo_mins)
+    elif focus_mins < 60:
+        focus_txt = t("focus_low_msg", time=focus_str, pomo=pomo_mins)
+    else:
+        focus_txt = t("focus_high_msg", time=focus_str)
+
+    # ── Energy / stress ───────────────────────────────────────
+    if energy >= 8:
+        energy_txt = t("energy_high_msg")
+    elif energy >= 5:
+        energy_txt = t("energy_mid_msg")
+    else:
+        energy_txt = t("energy_low_msg")
+
+    # ── Next advice ───────────────────────────────────────────
+    if overdue > 0:
+        next_txt = t("next_overdue", n=overdue)
+    elif today_cnt > 0:
+        next_txt = t("next_today", n=today_cnt)
+    elif weekly_score >= 70:
+        next_txt = t("next_good")
+    else:
+        next_txt = t("next_plan")
+
+    def _bullet(icon, text, color=Colors.TEXT_SECONDARY):
+        return ft.Row([
+            ft.Text(icon, size=14),
+            ft.Text(text, size=Typography.SMALL, color=color, expand=True,
+                    max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
+        ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.START)
+
+    return ft.Container(
+        content=ft.Column([
+            ft.Row([
+                ft.Container(
+                    content=ft.Icon(ft.Icons.AUTO_AWESOME_ROUNDED, size=16, color="white"),
+                    width=32, height=32, border_radius=16,
+                    gradient=ft.LinearGradient(
+                        colors=["#A855F7", "#3B82F6"],
+                        begin=ft.Alignment.TOP_LEFT,
+                        end=ft.Alignment.BOTTOM_RIGHT,
+                    ),
+                    alignment=ft.Alignment.CENTER,
+                ),
+                ft.Column([
+                    ft.Text(t("ai_comment_title"), size=Typography.H4,
+                            color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
+                    ft.Text(
+                        weekdays()[_dt.now().weekday()] + " " + _dt.now().strftime("%d/%m"),
+                        size=Typography.TINY, color=Colors.TEXT_MUTED),
+                ], spacing=1, tight=True, expand=True),
+            ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ft.Container(height=Spacing.SM),
+            ft.Container(height=1, bgcolor=Colors.BORDER),
+            ft.Container(height=Spacing.SM),
+            _bullet("📊", rate_txt, rate_color),
+            ft.Container(height=4),
+            _bullet("⚠️" if overdue > 0 else "✅", overdue_txt,
+                    Colors.ERROR if overdue > 0 else Colors.SUCCESS),
+            ft.Container(height=4),
+            _bullet("⚡", time_txt, Colors.PRIMARY),
+            ft.Container(height=4),
+            _bullet("🎯", focus_txt, Colors.TEXT_SECONDARY),
+            ft.Container(height=4),
+            _bullet("💪", energy_txt,
+                    Colors.SUCCESS if energy >= 8 else Colors.WARNING if energy >= 5 else Colors.ERROR),
+            ft.Container(height=Spacing.SM),
+            ft.Container(
+                content=ft.Text(next_txt, size=Typography.SMALL,
+                                color=Colors.TEXT_PRIMARY, weight=Typography.SEMIBOLD),
+                padding=ft.padding.symmetric(horizontal=Spacing.SM, vertical=8),
+                border_radius=Radius.MD,
+                bgcolor=Colors.PRIMARY_BG,
+                border=ft.Border.all(1, Colors.PRIMARY_BORDER),
+            ),
+        ], spacing=0, tight=True),
+        padding=Spacing.MD,
+        border_radius=Radius.LG,
+        bgcolor=Colors.BG_CARD,
+        border=ft.Border.all(1, Colors.PRIMARY_BORDER),
+        shadow=ft.BoxShadow(blur_radius=16, color=Colors.PRIMARY_SHADOW,
+                            offset=ft.Offset(0, 4)),
     )
 
 

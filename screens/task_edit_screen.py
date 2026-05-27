@@ -8,13 +8,14 @@ import threading
 from core.theme import Colors, Typography, Spacing, Radius
 from core.models import Task
 from core.services import TaskService, ProjectService
+from core.i18n import t
 from components.widgets import snack
 
 def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
     from core.theme import CATEGORY_MAP, PRIORITY_MAP, STATUS_MAP
 
     is_edit = task is not None
-    t = task or Task(
+    _task = task or Task(
         id=str(uuid.uuid4()), user_id=user.id,
         title="", category="personal", priority="medium", status="todo",
     )
@@ -53,23 +54,23 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
 
     # ── State ────────────────────────────────────────────
     _user_projects = ProjectService.get_projects(user.id)
-    proj_sel = {"v": getattr(t, "project_id", None)}
+    proj_sel = {"v": getattr(_task, "project_id", None)}
 
-    cat_sel = {"v": t.category}
-    pri_sel = {"v": t.priority}
-    sta_sel = {"v": t.status}
-    rec_sel = {"v": t.recur_pattern if t.recur_pattern else "none"}
-    cpl_sel = {"v": getattr(t, "complexity", "medium")}
-    dl_type_sel = {"v": getattr(t, "deadline_type", "soft")}
+    cat_sel = {"v": _task.category}
+    pri_sel = {"v": _task.priority}
+    sta_sel = {"v": _task.status}
+    rec_sel = {"v": _task.recur_pattern if _task.recur_pattern else "none"}
+    cpl_sel = {"v": getattr(_task, "complexity", "medium")}
+    dl_type_sel = {"v": getattr(_task, "deadline_type", "soft")}
 
-    tf_est = _tf("TG dự kiến (phút)", str(getattr(t, "estimated_minutes", 30)), hint="VD: 30", expand=1)
+    tf_est = _tf(t("est_minutes_lbl"), str(getattr(_task, "estimated_minutes", 30)), hint="30", expand=1)
     tf_est.keyboard_type = ft.KeyboardType.NUMBER
 
     # ── Fields ───────────────────────────────────────────
     tf_title = ft.TextField(
-        label="Tiêu đề *",
-        value=t.title,
-        hint_text="Nhập tiêu đề công việc...",
+        label=t("task_title_field"),
+        value=_task.title,
+        hint_text=t("task_title_hint"),
         bgcolor=Colors.BG_CARD,
         border_color=Colors.BORDER,
         focused_border_color=Colors.PRIMARY,
@@ -82,25 +83,25 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
         content_padding=ft.padding.symmetric(horizontal=14, vertical=14),
     )
 
-    tf_desc = _tf("Mô tả", t.description, multiline=True,
-                  hint="Thêm mô tả chi tiết...", min_l=2, max_l=3)
+    tf_desc = _tf(t("desc_label"), _task.description, multiline=True,
+                  hint=t("task_desc_hint"), min_l=2, max_l=3)
 
     # ── Date/Time pickers ────────────────────────────────
-    start_val = {"v": t.start_date or ""}
-    due_val   = {"v": t.due_date or ""}
-    time_val  = {"v": t.due_time or ""}
+    start_val = {"v": _task.start_date or ""}
+    due_val   = {"v": _task.due_date or ""}
+    time_val  = {"v": _task.due_time or ""}
 
     start_label = ft.Text(
-        t.start_date or "Chưa chọn",
-        size=Typography.SMALL, color=Colors.TEXT_PRIMARY if t.start_date else Colors.TEXT_MUTED,
+        _task.start_date or t("not_selected"),
+        size=Typography.SMALL, color=Colors.TEXT_PRIMARY if _task.start_date else Colors.TEXT_MUTED,
     )
     due_label = ft.Text(
-        t.due_date or "Chưa chọn",
-        size=Typography.SMALL, color=Colors.TEXT_PRIMARY if t.due_date else Colors.TEXT_MUTED,
+        _task.due_date or t("not_selected"),
+        size=Typography.SMALL, color=Colors.TEXT_PRIMARY if _task.due_date else Colors.TEXT_MUTED,
     )
     time_label = ft.Text(
-        t.due_time or "Chưa chọn",
-        size=Typography.SMALL, color=Colors.TEXT_PRIMARY if t.due_time else Colors.TEXT_MUTED,
+        _task.due_time or t("not_selected"),
+        size=Typography.SMALL, color=Colors.TEXT_PRIMARY if _task.due_time else Colors.TEXT_MUTED,
     )
 
     def on_start_change(e):
@@ -135,9 +136,9 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
         last_date=datetime(2030, 12, 31),
         on_change=on_start_change,
     )
-    if t.start_date:
+    if _task.start_date:
         try:
-            parts = t.start_date.split("-")
+            parts = _task.start_date.split("-")
             start_picker.value = datetime(int(parts[0]), int(parts[1]), int(parts[2]))
         except Exception: pass
 
@@ -146,9 +147,9 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
         last_date=datetime(2030, 12, 31),
         on_change=on_due_change,
     )
-    if t.due_date:
+    if _task.due_date:
         try:
-            parts = t.due_date.split("-")
+            parts = _task.due_date.split("-")
             due_picker.value = datetime(int(parts[0]), int(parts[1]), int(parts[2]))
         except Exception: pass
 
@@ -156,9 +157,9 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
         help_text="Chọn giờ hoàn thành",
         on_change=on_time_change,
     )
-    if t.due_time:
+    if _task.due_time:
         try:
-            parts = t.due_time.split(":")
+            parts = _task.due_time.split(":")
             from datetime import time as dt_time
             time_picker.value = dt_time(int(parts[0]), int(parts[1]))
         except Exception:
@@ -190,12 +191,12 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
             ),
         )
 
-    btn_start = _date_btn(ft.Icons.PLAY_CIRCLE_OUTLINE, "Ngày bắt đầu", start_label, start_picker)
-    btn_due   = _date_btn(ft.Icons.EVENT_OUTLINED, "Hạn hoàn thành", due_label, due_picker)
-    btn_time  = _date_btn(ft.Icons.ACCESS_TIME_OUTLINED, "Giờ", time_label, time_picker)
+    btn_start = _date_btn(ft.Icons.PLAY_CIRCLE_OUTLINE, t("start_date_lbl"), start_label, start_picker)
+    btn_due   = _date_btn(ft.Icons.EVENT_OUTLINED, t("due_date_lbl"), due_label, due_picker)
+    btn_time  = _date_btn(ft.Icons.ACCESS_TIME_OUTLINED, t("time_lbl"), time_label, time_picker)
 
-    notes_val = t.notes if hasattr(t, "notes") else ""
-    tf_notes = _tf("Ghi chú", notes_val, multiline=True, hint="Ghi chú thêm...", min_l=2, max_l=4)
+    notes_val = _task.notes if hasattr(_task, "notes") else ""
+    tf_notes = _tf(t("desc_label"), notes_val, multiline=True, hint=t("task_notes_hint"), min_l=2, max_l=4)
 
     # ── Chip builder ─────────────────────────────────────
     def make_chips(options, sel_ref):
@@ -264,15 +265,15 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
         return ft.Row(chips, scroll=ft.ScrollMode.AUTO, spacing=6)
 
     rem_dropdown = ft.Dropdown(
-        label="Nhắc nhở trước",
-        value=str(t.reminder_minutes) if getattr(t, "reminder_minutes", 0) > 0 else "0",
+        label=t("reminder_lbl"),
+        value=str(_task.reminder_minutes) if getattr(_task, "reminder_minutes", 0) > 0 else "0",
         options=[
-            ft.dropdown.Option("0", "Không nhắc"),
-            ft.dropdown.Option("5", "5 phút"),
-            ft.dropdown.Option("15", "15 phút"),
-            ft.dropdown.Option("30", "30 phút"),
-            ft.dropdown.Option("60", "1 giờ"),
-            ft.dropdown.Option("1440", "1 ngày"),
+            ft.dropdown.Option("0", t("no_reminder")),
+            ft.dropdown.Option("5", f"5 {t('minutes_short')}"),
+            ft.dropdown.Option("15", f"15 {t('minutes_short')}"),
+            ft.dropdown.Option("30", f"30 {t('minutes_short')}"),
+            ft.dropdown.Option("60", "1h"),
+            ft.dropdown.Option("1440", "1d"),
         ],
         bgcolor=Colors.BG_CARD,
         border_color=Colors.BORDER,
@@ -283,28 +284,28 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
     )
 
     rec_chips = make_option_chips([
-        ("none",    "Không"),
-        ("daily",   "Hàng ngày"),
-        ("weekly",  "Hàng tuần"),
-        ("monthly", "Hàng tháng"),
+        ("none",    t("repeat_none")),
+        ("daily",   t("repeat_daily")),
+        ("weekly",  t("repeat_weekly")),
+        ("monthly", t("repeat_monthly")),
     ], rec_sel)
 
     cpl_chips = make_option_chips([
-        ("easy", "Dễ"),
-        ("medium", "Vừa"),
-        ("hard", "Khó"),
+        ("easy",   t("complexity_easy")),
+        ("medium", t("complexity_medium")),
+        ("hard",   t("complexity_hard")),
     ], cpl_sel)
 
     dl_type_chips = make_option_chips(
-        [("soft", "Mềm"), ("hard", "Cứng"), ("estimated", "Ước tính")],
+        [("soft", t("deadline_soft")), ("hard", t("deadline_hard")), ("estimated", t("deadline_estimated"))],
         dl_type_sel,
     )
 
-    _proj_options = [ft.dropdown.Option(key="", text="— Không thuộc dự án —")]
+    _proj_options = [ft.dropdown.Option(key="", text=t("no_project"))]
     _proj_options += [ft.dropdown.Option(key=p.id, text=p.name) for p in _user_projects]
 
     proj_dropdown = ft.Dropdown(
-        label="Dự án",
+        label=t("project_lbl"),
         value=proj_sel["v"] or "",
         options=_proj_options,
         bgcolor=Colors.BG_CARD,
@@ -337,13 +338,13 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
         if data.get("priority") in ("high", "medium", "low"):
             pri_sel["v"] = data["priority"]
         page.update()
-        snack(page, "✓ AI đã điền thông tin từ ảnh — kiểm tra và chỉnh sửa nếu cần")
+        snack(page, t("ocr_fill") + " ✓")
 
     def _show_ocr_confirm(ocr_text: str, data: dict):
         """Show OCR result + AI-parsed fields for user to confirm."""
         tf_raw = ft.TextField(
             value=ocr_text[:500],
-            label="Văn bản nhận dạng được",
+            label=t("ocr_recognized"),
             multiline=True, min_lines=3, max_lines=5,
             bgcolor=Colors.BG_SURFACE, border_color=Colors.BORDER,
             focused_border_color=Colors.PRIMARY,
@@ -389,10 +390,10 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
                     ft.Row([
                         ft.Icon(ft.Icons.DOCUMENT_SCANNER_OUTLINED, size=18,
                                 color=Colors.PRIMARY),
-                        ft.Text("Kết quả OCR + AI", size=Typography.H3,
+                        ft.Text(t("ocr_title"), size=Typography.H3,
                                 color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
                     ], spacing=Spacing.SM),
-                    ft.Text("AI đã phân tích ảnh. Xác nhận để điền vào form.",
+                    ft.Text(t("ocr_subtitle"),
                             size=Typography.TINY, color=Colors.TEXT_MUTED),
                     ft.Container(height=Spacing.SM),
                     tf_raw,
@@ -401,7 +402,7 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
                     ft.Container(height=Spacing.MD),
                     ft.Row([
                         ft.Container(
-                            content=ft.Text("Bỏ qua", size=Typography.BODY,
+                            content=ft.Text(t("ocr_skip"), size=Typography.BODY,
                                             color=Colors.TEXT_MUTED),
                             height=44, expand=True, border_radius=Radius.MD,
                             bgcolor=Colors.BG_SURFACE,
@@ -413,7 +414,7 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
                         ft.Container(
                             content=ft.Row([
                                 ft.Icon(ft.Icons.CHECK_ROUNDED, size=16, color="white"),
-                                ft.Text("Điền vào form", size=Typography.BODY,
+                                ft.Text(t("ocr_fill"), size=Typography.BODY,
                                         color="white", weight=Typography.SEMIBOLD),
                             ], alignment=ft.MainAxisAlignment.CENTER, spacing=4),
                             height=44, expand=True, border_radius=Radius.MD,
@@ -508,43 +509,43 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
     def save_task(_):
         title = tf_title.value.strip()
         if not title:
-            err_ref.current.value = "⚠️  Vui lòng nhập tiêu đề!"
+            err_ref.current.value = t("task_not_saved")
             page.update()
             return
             
         # Check if task is postponed (due date changed to later date)
-        old_due_date = t.due_date
+        old_due_date = _task.due_date
         new_due_date = due_val["v"] or None
         if is_edit and old_due_date and new_due_date:
             try:
                 old_d = datetime.strptime(old_due_date, "%Y-%m-%d")
                 new_d = datetime.strptime(new_due_date, "%Y-%m-%d")
                 if new_d > old_d:
-                    t.postpone_count = getattr(t, "postpone_count", 0) + 1
-                    TaskService.mark_delayed(t, reason="User changed due date")
+                    _task.postpone_count = getattr(_task, "postpone_count", 0) + 1
+                    TaskService.mark_delayed(_task, reason="User changed due date")
             except Exception:
                 pass
                 
-        t.title            = title
-        t.description      = tf_desc.value.strip()
-        t.start_date       = start_val["v"] or None
-        t.due_date         = new_due_date
-        t.due_time         = time_val["v"] or None
-        t.category         = cat_sel["v"]
-        t.priority         = pri_sel["v"]
-        t.status           = sta_sel["v"]
-        t.is_recurring     = rec_sel["v"] != "none"
-        t.recur_pattern    = "" if rec_sel["v"] == "none" else rec_sel["v"]
-        t.reminder_minutes = int(rem_dropdown.value) if rem_dropdown.value else 0
-        t.complexity       = cpl_sel["v"]
-        t.deadline_type    = dl_type_sel["v"]
-        t.project_id       = proj_sel["v"] or None
-        t.estimated_minutes= int(tf_est.value) if tf_est.value and tf_est.value.isdigit() else 30
-        t.notes            = tf_notes.value.strip()
-        if t.status == "done" and not t.completed_at:
-            t.completed_at = datetime.now().isoformat()
-        TaskService.save_task(t)
-        snack(page, "Đã lưu công việc ✓")
+        _task.title            = title
+        _task.description      = tf_desc.value.strip()
+        _task.start_date       = start_val["v"] or None
+        _task.due_date         = new_due_date
+        _task.due_time         = time_val["v"] or None
+        _task.category         = cat_sel["v"]
+        _task.priority         = pri_sel["v"]
+        _task.status           = sta_sel["v"]
+        _task.is_recurring     = rec_sel["v"] != "none"
+        _task.recur_pattern    = "" if rec_sel["v"] == "none" else rec_sel["v"]
+        _task.reminder_minutes = int(rem_dropdown.value) if rem_dropdown.value else 0
+        _task.complexity       = cpl_sel["v"]
+        _task.deadline_type    = dl_type_sel["v"]
+        _task.project_id       = proj_sel["v"] or None
+        _task.estimated_minutes= int(tf_est.value) if tf_est.value and tf_est.value.isdigit() else 30
+        _task.notes            = tf_notes.value.strip()
+        if _task.status == "done" and not _task.completed_at:
+            _task.completed_at = datetime.now().isoformat()
+        TaskService.save_task(_task)
+        snack(page, t("save_success_task"))
         on_navigate("tasks")
         
 
@@ -555,7 +556,7 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
     header = ft.Container(
         content=ft.Row([
             ft.IconButton(ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED, on_click=cancel_task),
-            ft.Text("Sửa công việc" if is_edit else "Công việc mới", size=Typography.H2, color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
+            ft.Text(t("edit_task_title") if is_edit else t("new_task_title"), size=Typography.H2, color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
         ]),
         padding=ft.Padding.symmetric(horizontal=Spacing.MD, vertical=Spacing.MD),
     )
@@ -564,40 +565,40 @@ def build_task_edit_screen(page: ft.Page, user, on_navigate, task=None):
     form_body = ft.Container(
         content=ft.Column([
             ft.Row([
-                _section_label("📝  NỘI DUNG"),
+                _section_label(t("section_content")),
                 ft.Container(expand=True),
-                ft.IconButton(ft.Icons.DOCUMENT_SCANNER_OUTLINED, icon_color=Colors.PRIMARY, icon_size=18, tooltip="Quét chữ từ ảnh", on_click=process_ocr_click)
+                ft.IconButton(ft.Icons.DOCUMENT_SCANNER_OUTLINED, icon_color=Colors.PRIMARY, icon_size=18, tooltip=t("scan_img_tooltip"), on_click=process_ocr_click)
             ]),
             tf_title, ft.Container(height=Spacing.SM), tf_desc, _div(),
-            
-            _section_label("📅  THỜI GIAN"),
+
+            _section_label(t("section_time")),
             ft.Row([btn_start, ft.Container(width=Spacing.SM), btn_due]), ft.Container(height=Spacing.SM), ft.Row([btn_time]), _div(),
-            
-            _section_label("🏷️  PHÂN LOẠI"),
+
+            _section_label(t("section_classify")),
             ft.Container(content=proj_dropdown, padding=ft.padding.symmetric(vertical=4)) if len(_user_projects) > 0 else ft.Container(),
-            ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.FOLDER_OUTLINED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text("Danh mục", size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), cat_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
-            ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.FLAG_OUTLINED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text("Độ ưu tiên", size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), pri_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
-            ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.TERRAIN_ROUNDED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text("Độ phức tạp", size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), cpl_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
-            ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.LOCK_CLOCK_OUTLINED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text("Kiểu deadline", size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), dl_type_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
+            ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.FOLDER_OUTLINED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text(t("category_label"), size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), cat_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
+            ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.FLAG_OUTLINED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text(t("priority_label"), size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), pri_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
+            ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.TERRAIN_ROUNDED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text(t("complexity_lbl"), size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), cpl_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
+            ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.LOCK_CLOCK_OUTLINED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text(t("deadline_type_lbl"), size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), dl_type_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
             ft.Container(content=tf_est, padding=ft.padding.symmetric(vertical=6)),
             _div(),
-            
-            _section_label("⚙️  CÀI ĐẶT"),
+
+            _section_label(t("section_settings")),
             ft.Container(content=rem_dropdown, padding=ft.padding.symmetric(vertical=4)),
             ft.Container(height=Spacing.SM),
-            ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.REPEAT_ROUNDED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text("Lặp lại", size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), rec_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
+            ft.Container(content=ft.Column([ft.Row([ft.Icon(ft.Icons.REPEAT_ROUNDED, size=13, color=Colors.TEXT_MUTED), ft.Container(width=4), ft.Text(t("repeat_lbl"), size=Typography.TINY, color=Colors.TEXT_MUTED)]), ft.Container(height=6), rec_chips], spacing=0, tight=True), padding=ft.padding.symmetric(vertical=4)),
             _div(),
-            
-            _section_label("📌  GHI CHÚ"),
+
+            _section_label(t("section_notes")),
             tf_notes, ft.Container(height=Spacing.MD),
-            
+
             ft.Text("", ref=err_ref, color=Colors.ERROR, size=Typography.SMALL, text_align=ft.TextAlign.CENTER),
             ft.Container(height=Spacing.SM),
-            
+
             ft.Row([
-                ft.Container(content=ft.Text("Hủy", size=Typography.BODY, color=Colors.TEXT_MUTED, weight=Typography.MEDIUM), height=48, expand=1, border_radius=Radius.MD, bgcolor=Colors.BG_SURFACE, border=ft.Border.all(1, Colors.BORDER), alignment=ft.Alignment.CENTER, on_click=cancel_task, ink=True),
+                ft.Container(content=ft.Text(t("cancel"), size=Typography.BODY, color=Colors.TEXT_MUTED, weight=Typography.MEDIUM), height=48, expand=1, border_radius=Radius.MD, bgcolor=Colors.BG_SURFACE, border=ft.Border.all(1, Colors.BORDER), alignment=ft.Alignment.CENTER, on_click=cancel_task, ink=True),
                 ft.Container(width=Spacing.SM),
-                ft.Container(content=ft.Row([ft.Icon(ft.Icons.CHECK_ROUNDED, size=16, color=Colors.TEXT_ON_PRIMARY), ft.Container(width=4), ft.Text("Lưu", size=Typography.BODY, color=Colors.TEXT_ON_PRIMARY, weight=Typography.SEMIBOLD)], alignment=ft.MainAxisAlignment.CENTER, spacing=0), height=48, expand=2, border_radius=Radius.MD, bgcolor=Colors.PRIMARY, alignment=ft.Alignment.CENTER, on_click=save_task, ink=True),
+                ft.Container(content=ft.Row([ft.Icon(ft.Icons.CHECK_ROUNDED, size=16, color=Colors.TEXT_ON_PRIMARY), ft.Container(width=4), ft.Text(t("save"), size=Typography.BODY, color=Colors.TEXT_ON_PRIMARY, weight=Typography.SEMIBOLD)], alignment=ft.MainAxisAlignment.CENTER, spacing=0), height=48, expand=2, border_radius=Radius.MD, bgcolor=Colors.PRIMARY, alignment=ft.Alignment.CENTER, on_click=save_task, ink=True),
             ]),
             ft.Container(height=Spacing.XXXL),
             ft.Container(height=Spacing.XXXL),

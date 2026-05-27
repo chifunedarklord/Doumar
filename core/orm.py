@@ -80,6 +80,7 @@ def _create_engine_mssql():
 
 engine = _create_engine_mssql()
 DB_BACKEND = "mssql"
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 class Base(DeclarativeBase):
@@ -224,31 +225,6 @@ class ProductivityLogModel(Base):
     burnout_risk: Mapped[float] = mapped_column(Float, default=0.0)
     focus_time_minutes: Mapped[int] = mapped_column(Integer, default=0)
     completed_tasks_count: Mapped[int] = mapped_column(Integer, default=0)
-
-class ProjectModel(Base):
-    __tablename__ = "projects"
-    id: Mapped[str] = mapped_column(Unicode(36), primary_key=True)
-    user_id: Mapped[str] = mapped_column(Unicode(36), index=True)
-    name: Mapped[str] = mapped_column(Unicode(500))
-    description: Mapped[str] = mapped_column(UnicodeText, default="")
-    color: Mapped[str] = mapped_column(Unicode(20), default="#5B4FBE")
-    status: Mapped[str] = mapped_column(Unicode(20), default="active")
-    priority: Mapped[str] = mapped_column(Unicode(20), default="medium")
-    due_date: Mapped[Optional[str]] = mapped_column(Unicode(20), nullable=True)
-    created_at: Mapped[str] = mapped_column(Unicode(50))
-    updated_at: Mapped[str] = mapped_column(Unicode(50))
-
-class ProjectProgressModel(Base):
-    __tablename__ = "project_progress"
-    id: Mapped[str] = mapped_column(Unicode(36), primary_key=True)
-    user_id: Mapped[str] = mapped_column(Unicode(36))
-    name: Mapped[str] = mapped_column(Unicode(500))
-    description: Mapped[str] = mapped_column(UnicodeText, default="")
-    target_date: Mapped[Optional[str]] = mapped_column(Unicode(20), nullable=True)
-    status: Mapped[str] = mapped_column(Unicode(20), default="active")
-    task_ids: Mapped[list] = mapped_column(JSON, default=list)
-    created_at: Mapped[str] = mapped_column(Unicode(50))
-    updated_at: Mapped[str] = mapped_column(Unicode(50))
 
 # Initialize schema
 Base.metadata.create_all(bind=engine)

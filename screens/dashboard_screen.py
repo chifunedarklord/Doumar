@@ -7,15 +7,13 @@ from datetime import datetime, date, timedelta
 from core.theme import Colors, Typography, Spacing, Radius, CATEGORY_MAP, PRIORITY_MAP, STATUS_MAP
 from core.models import Task
 from core.services import TaskService, BehaviorService, AnalyticsService
+from core.i18n import t, weekdays, months, greeting as i18n_greeting
 from components.widgets import (
     glow_text, primary_divider, glass_card, primary_button,
     text_input, snack, avatar_circle, priority_badge,
     category_badge, status_chip, section_header, stat_card
 )
 
-WEEKDAYS_VI = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"]
-MONTHS_VI   = ["Tháng 1","Tháng 2","Tháng 3","Tháng 4","Tháng 5","Tháng 6",
-               "Tháng 7","Tháng 8","Tháng 9","Tháng 10","Tháng 11","Tháng 12"]
 
 
 def build_dashboard(page: ft.Page, user, on_navigate):
@@ -106,20 +104,15 @@ def build_dashboard(page: ft.Page, user, on_navigate):
     # ── Header ───────────────────────────────────────────────
     now = datetime.now()
     hour = now.hour
-    greeting = ("Chào buổi sáng" if hour < 12 else
-                "Chào buổi chiều" if hour < 18 else "Chào buổi tối")
+    _greeting = i18n_greeting(hour)
 
     header = ft.Container(
         content=ft.Row([
             ft.Column([
-                ft.Text(f"{greeting},", size=Typography.BODY, color=Colors.TEXT_MUTED),
+                ft.Text(f"{_greeting},", size=Typography.BODY, color=Colors.TEXT_MUTED),
                 ft.Text(user.full_name or user.username, size=Typography.H2,
                         color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
-                ft.Text(now.strftime("%A, %d/%m/%Y").replace(
-                    "Monday","Thứ Hai").replace("Tuesday","Thứ Ba")
-                    .replace("Wednesday","Thứ Tư").replace("Thursday","Thứ Năm")
-                    .replace("Friday","Thứ Sáu").replace("Saturday","Thứ Bảy")
-                    .replace("Sunday","Chủ Nhật"),
+                ft.Text(now.strftime("%d/%m/%Y ") + weekdays()[now.weekday()],
                         size=Typography.SMALL, color=Colors.TEXT_MUTED),
             ], spacing=2, tight=True),
             ft.Row([], expand=True),
@@ -162,15 +155,15 @@ def build_dashboard(page: ft.Page, user, on_navigate):
         content=ft.Column([
             ft.Row([
                 ft.Column([
-                    ft.Text("Tổng quan công việc", size=Typography.H4,
+                    ft.Text(t("overview"), size=Typography.H4,
                             color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
                     ft.Container(height=2),
                     ft.Row([
-                        _mini_stat(str(total),          "Tổng",       Colors.PRIMARY),
-                        _mini_stat(str(done),           "Xong",       Colors.SUCCESS),
-                        _mini_stat(str(in_prog),        "Đang làm",   Colors.ACCENT_CYAN),
-                        _mini_stat(str(overdue),        "Quá hạn",    Colors.ERROR),
-                        _mini_stat(str(len(today_tasks)),"Hôm nay",   Colors.WARNING),
+                        _mini_stat(str(total),           t("total_stat"),       Colors.PRIMARY),
+                        _mini_stat(str(done),            t("done_stat"),        Colors.SUCCESS),
+                        _mini_stat(str(in_prog),         t("in_progress_stat"), Colors.ACCENT_CYAN),
+                        _mini_stat(str(overdue),         t("overdue_stat"),     Colors.ERROR),
+                        _mini_stat(str(len(today_tasks)),t("today_stat"),       Colors.WARNING),
                     ], spacing=Spacing.SM),
                 ], spacing=0, expand=True),
                 progress_ring,
@@ -180,11 +173,11 @@ def build_dashboard(page: ft.Page, user, on_navigate):
             ft.Container(
                 content=ft.Row([
                     ft.Icon(ft.Icons.TIMER_OUTLINED, size=13, color=Colors.PRIMARY),
-                    ft.Text(f"Focus hôm nay: ", size=Typography.TINY, color=Colors.TEXT_MUTED),
+                    ft.Text(f"{t('focus_today')}: ", size=Typography.TINY, color=Colors.TEXT_MUTED),
                     ft.Text(focus_str, size=Typography.TINY, color=Colors.PRIMARY,
                             weight=Typography.SEMIBOLD),
                     ft.Container(width=8),
-                    ft.Text(f"{completion_pct}% hoàn thành", size=Typography.TINY,
+                    ft.Text(f"{completion_pct}% {t('pct_done')}", size=Typography.TINY,
                             color=Colors.SUCCESS if completion_pct >= 50 else Colors.TEXT_MUTED),
                 ], spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 padding=ft.padding.symmetric(horizontal=6, vertical=4),
@@ -202,7 +195,7 @@ def build_dashboard(page: ft.Page, user, on_navigate):
 
     # ── AI Insights card ─────────────────────────────────────
     burnout_color = burnout["color"]
-    peak_str = ", ".join(f"{h:02d}h" for h in peak_hours) if peak_hours else "Chưa có dữ liệu"
+    peak_str = ", ".join(f"{h:02d}h" for h in peak_hours) if peak_hours else t("no_data")
     prod_color = Colors.SUCCESS if productivity_score >= 70 else Colors.WARNING if productivity_score >= 40 else Colors.ERROR
 
     ai_insights_card = ft.Container(
@@ -217,15 +210,15 @@ def build_dashboard(page: ft.Page, user, on_navigate):
                         color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
                 ft.Row([], expand=True),
                 ft.GestureDetector(
-                    content=ft.Text("Chi tiết", size=Typography.TINY, color=Colors.PRIMARY),
+                    content=ft.Text(t("details"), size=Typography.TINY, color=Colors.PRIMARY),
                     on_tap=lambda _: on_navigate("report"),
                 ),
             ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ft.Container(height=Spacing.SM),
             ft.Row([
                 _insight_chip("⚡", "Peak hours", peak_str, Colors.PRIMARY),
-                _insight_chip("📊", "Năng suất tuần", f"{productivity_score:.0f}/100", prod_color),
-                _insight_chip("🔥", "Burnout risk", burnout["label"], burnout_color),
+                _insight_chip("📊", t("weekly_score"), f"{productivity_score:.0f}/100", prod_color),
+                _insight_chip("🔥", t("burnout_risk"), burnout["label"], burnout_color),
             ], spacing=Spacing.SM),
         ], spacing=0, tight=True),
         padding=Spacing.MD, border_radius=Radius.LG,
@@ -294,10 +287,10 @@ def build_dashboard(page: ft.Page, user, on_navigate):
         )
 
     quick_actions = ft.Row([
-        quick_action("📋", "Công việc",  Colors.PRIMARY, "tasks"),
-        quick_action("📁", "Dự án",      Colors.PRIMARY, "projects"),
-        quick_action("📅", "Lịch biểu", Colors.PRIMARY, "calendar"),
-        quick_action("📊", "Analytics",  Colors.PRIMARY, "report"),
+        quick_action("📋", t("qa_tasks"),    Colors.PRIMARY,     "tasks"),
+        quick_action("📅", t("qa_calendar"), Colors.ACCENT_CYAN, "calendar"),
+        quick_action("📊", t("qa_report"),   Colors.SUCCESS,     "report"),
+        quick_action("🤖", t("qa_ai"),       Colors.PRIMARY,     "ai"),
     ], alignment=ft.MainAxisAlignment.SPACE_AROUND)
 
     # ── Smart Schedule Timeline ──────────────────────────────
@@ -322,7 +315,7 @@ def build_dashboard(page: ft.Page, user, on_navigate):
                             overflow=ft.TextOverflow.ELLIPSIS),
                     ft.Row([
                         ft.Text(cat_info["icon"], size=11),
-                        ft.Text(f"{slot['duration_minutes']} phút", size=Typography.TINY, color=Colors.TEXT_MUTED),
+                        ft.Text(f"{slot['duration_minutes']} {t('minutes_short')}", size=Typography.TINY, color=Colors.TEXT_MUTED),
                         ft.Text("·", size=Typography.TINY, color=Colors.TEXT_MUTED),
                         ft.Text({"deep_work": "Deep Work", "quick_win": "Quick Win", "regular": "Regular"}.get(
                             slot["block_type"], "Regular"), size=Typography.TINY, color=score_color),
@@ -339,12 +332,12 @@ def build_dashboard(page: ft.Page, user, on_navigate):
 
     ai_tasks_section = ft.Column([
         section_header("✨ AI Smart Schedule",
-                       "Lịch làm việc tối ưu năng lượng hôm nay",
-                       "Tất cả", lambda _: on_navigate("tasks")),
+                       t("schedule_subtitle"),
+                       t("see_all"), lambda _: on_navigate("tasks")),
         ft.Container(height=Spacing.SM),
         ft.Column(
             [schedule_item(slot) for slot in schedule_slots if slot.get("task")] if schedule_slots
-            else [ft.Text("🎉 Không có việc cần làm!", size=Typography.BODY,
+            else [ft.Text(t("no_schedule"), size=Typography.BODY,
                           color=Colors.TEXT_MUTED, text_align=ft.TextAlign.CENTER)],
             spacing=0, tight=True,
         ),
@@ -355,7 +348,7 @@ def build_dashboard(page: ft.Page, user, on_navigate):
         is_today = (d == date.today())
         has_task = any(t.due_date == d.isoformat() for t in tasks)
         wd = d.weekday()
-        label = WEEKDAYS_VI[wd] if wd < 7 else "CN"
+        label = weekdays()[wd]
         return ft.Container(
             content=ft.Column([
                 ft.Text(label, size=Typography.TINY,
@@ -381,10 +374,10 @@ def build_dashboard(page: ft.Page, user, on_navigate):
     week_card = ft.Container(
         content=ft.Column([
             ft.Row([
-                ft.Text(f"{MONTHS_VI[today.month-1]} {today.year}", size=Typography.H4,
+                ft.Text(f"{months()[today.month-1]} {today.year}", size=Typography.H4,
                         color=Colors.TEXT_PRIMARY, weight=Typography.SEMIBOLD),
                 ft.Row([], expand=True),
-                ft.TextButton("Xem lịch", on_click=lambda _: on_navigate("calendar"),
+                ft.TextButton(t("view_calendar"), on_click=lambda _: on_navigate("calendar"),
                               style=ft.ButtonStyle(color=Colors.PRIMARY, padding=ft.Padding.all(0))),
             ]),
             ft.Container(height=Spacing.SM),
@@ -454,13 +447,13 @@ def build_dashboard(page: ft.Page, user, on_navigate):
         )
 
     priority_section = ft.Column([
-        section_header("🎯 Việc nên ưu tiên hôm nay",
-                       f"{len(overdue_t)} quá hạn · {len(today_task_list)} hôm nay",
-                       "Tất cả", lambda _: on_navigate("tasks")),
+        section_header("🎯 " + t("priority_today"),
+                       t("overdue_today_subtitle", o=len(overdue_t), d=len(today_task_list)),
+                       t("see_all"), lambda _: on_navigate("tasks")),
         ft.Container(height=Spacing.SM),
-        *(([_pri_task_row(t) for t in priority_tasks]) if priority_tasks else
+        *(([_pri_task_row(tk) for tk in priority_tasks]) if priority_tasks else
           [ft.Container(
-              content=ft.Text("🎉 Không có việc ưu tiên!", size=Typography.BODY,
+              content=ft.Text(t("no_priority_tasks"), size=Typography.BODY,
                               color=Colors.TEXT_MUTED, text_align=ft.TextAlign.CENTER),
               padding=ft.padding.symmetric(vertical=Spacing.MD),
           )]),
@@ -506,6 +499,7 @@ def _mini_stat(value: str, label: str, color: str) -> ft.Column:
 def _build_checkin_card(page: ft.Page, user) -> ft.Container | None:
     """Returns check-in card if not yet done today, otherwise None."""
     from core.services import AIMemoryService, BehaviorService
+    from core.i18n import t
     today_str = date.today().isoformat()
     last_checkin = AIMemoryService.recall_value(user.id, "state", "last_checkin_date")
     if last_checkin == today_str:
@@ -561,31 +555,31 @@ def _build_checkin_card(page: ft.Page, user) -> ft.Container | None:
         content=ft.Column([
             ft.Row([
                 ft.Text("☀️", size=18),
-                ft.Text("Check-in buổi sáng", size=Typography.H4,
+                ft.Text(t("checkin_title"), size=Typography.H4,
                         color=Colors.TEXT_PRIMARY, weight=Typography.BOLD, expand=True),
                 ft.TextButton(
-                    "Bỏ qua",
+                    t("skip"),
                     on_click=_submit,
                     style=ft.ButtonStyle(color=Colors.TEXT_MUTED,
                                          padding=ft.Padding.all(0)),
                 ),
             ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-            ft.Text("Hôm nay bạn thế nào?", size=Typography.TINY, color=Colors.TEXT_MUTED),
+            ft.Text(t("checkin_subtitle"), size=Typography.TINY, color=Colors.TEXT_MUTED),
             ft.Container(height=Spacing.SM),
             ft.Row([
-                ft.Text("⚡ Năng lượng", size=Typography.SMALL, color=Colors.TEXT_SECONDARY,
+                ft.Text(t("checkin_energy_label"), size=Typography.SMALL, color=Colors.TEXT_SECONDARY,
                         width=100),
                 energy_slider,
                 energy_display,
             ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ft.Row([
-                ft.Text("😊 Tâm trạng", size=Typography.SMALL, color=Colors.TEXT_SECONDARY,
+                ft.Text(t("checkin_mood_label"), size=Typography.SMALL, color=Colors.TEXT_SECONDARY,
                         width=100),
                 mood_slider,
                 mood_display,
             ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ft.Container(height=Spacing.XS),
-            primary_button("Bắt đầu ngày mới 🚀", on_click=_submit, height=44),
+            primary_button(t("start_day"), on_click=_submit, height=44),
         ], spacing=4, tight=True),
         padding=Spacing.MD,
         border_radius=Radius.LG,

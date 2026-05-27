@@ -5,6 +5,7 @@ import flet as ft
 from core.theme import Colors, Typography, Spacing, Radius
 from core.services import TaskService
 from components.widgets import avatar_circle
+from core.i18n import t
 
 def build_profile_screen(page: ft.Page, user, on_navigate, on_logout=None):
     avatar_area = ft.Container(
@@ -33,21 +34,21 @@ def build_profile_screen(page: ft.Page, user, on_navigate, on_logout=None):
     stats_row = ft.Container(
         content=ft.Column([
             ft.Row([
-                _small_stat(str(total),        "Tổng CT",    Colors.VIOLET),
+                _small_stat(str(total),        t("total_vi"),       Colors.VIOLET),
                 _divider_v(),
-                _small_stat(str(done),         "Xong",       Colors.SUCCESS),
+                _small_stat(str(done),         t("done_stat"),      Colors.SUCCESS),
                 _divider_v(),
-                _small_stat(str(in_prog),      "Đang làm",   Colors.CYAN),
+                _small_stat(str(in_prog),      t("in_progress_stat"), Colors.CYAN),
                 _divider_v(),
-                _small_stat(str(overdue_cnt),  "Quá hạn",    Colors.ERROR),
+                _small_stat(str(overdue_cnt),  t("overdue_stat"),   Colors.ERROR),
                 _divider_v(),
-                _small_stat(f"{int(done/total*100) if total else 0}%", "Tỷ lệ", Colors.PRIMARY),
+                _small_stat(f"{int(done/total*100) if total else 0}%", t("rate_stat"), Colors.PRIMARY),
             ], alignment=ft.MainAxisAlignment.SPACE_AROUND, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ft.Container(height=Spacing.SM),
             ft.Container(
                 content=ft.Row([
                     ft.Icon(ft.Icons.BAR_CHART_ROUNDED, color=Colors.TEXT_MUTED, size=16),
-                    ft.Text("Xem báo cáo chi tiết", size=Typography.TINY, color=Colors.TEXT_MUTED),
+                    ft.Text(t("view_report_detail"), size=Typography.TINY, color=Colors.TEXT_MUTED),
                     ft.Icon(ft.Icons.CHEVRON_RIGHT, color=Colors.TEXT_MUTED, size=16),
                 ], alignment=ft.MainAxisAlignment.CENTER, spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 on_click=lambda _: on_navigate("report"),
@@ -88,10 +89,10 @@ def build_profile_screen(page: ft.Page, user, on_navigate, on_logout=None):
         )
 
     achievements = ft.Column([
-        _achieve_card("🏆", "Người khởi đầu", "Hoàn thành 1 công việc đầu tiên", done >= 1),
-        _achieve_card("🔥", "Khởi động tốt", "Hoàn thành 5 công việc", done >= 5),
-        _achieve_card("🌟", "Chuyên gia", "Thực hiện xong 20 công việc", done >= 20),
-        _achieve_card("🚀", "Không cản nổi", "Tích lũy 50 công việc hoàn thiện", done >= 50),
+        _achieve_card("🏆", t("ach_1_title"), t("ach_1_desc"), done >= 1),
+        _achieve_card("🔥", t("ach_2_title"), t("ach_2_desc"), done >= 5),
+        _achieve_card("🌟", t("ach_3_title"), t("ach_3_desc"), done >= 20),
+        _achieve_card("🚀", t("ach_4_title"), t("ach_4_desc"), done >= 50),
     ], spacing=Spacing.SM)
 
 
@@ -166,25 +167,41 @@ def build_profile_screen(page: ft.Page, user, on_navigate, on_logout=None):
         shadow=ft.BoxShadow(blur_radius=8, color=Colors.PRIMARY_SHADOW, offset=ft.Offset(0, 2)),
     )
 
-    # ── Logout ────────────────────────────────────────────────
-    logout_btn = ft.Container(
-        content=ft.Row([
-            ft.Icon(ft.Icons.LOGOUT_ROUNDED, size=18, color=Colors.ERROR),
-            ft.Text("Đăng xuất", size=Typography.BODY,
-                    color=Colors.ERROR, weight=Typography.MEDIUM),
-        ], spacing=Spacing.SM, alignment=ft.MainAxisAlignment.CENTER),
-        height=44, border_radius=Radius.MD,
-        bgcolor=f"#10{Colors.ERROR[1:]}",
-        border=ft.Border.all(1, f"#30{Colors.ERROR[1:]}"),
-        alignment=ft.Alignment.CENTER,
-        on_click=lambda _: on_logout() if on_logout else None,
-        ink=True,
-    ) if on_logout else ft.Container(height=0)
+    # ── Menu items ────────────────────────────────────────────
+    def _menu_item(icon, label, color, on_tap):
+        return ft.Container(
+            content=ft.Row([
+                ft.Container(
+                    content=ft.Icon(icon, size=18, color=color),
+                    width=36, height=36,
+                    border_radius=Radius.MD,
+                    bgcolor=f"#12{color[1:]}" if color.startswith("#") else Colors.PRIMARY_BG,
+                    alignment=ft.Alignment.CENTER,
+                ),
+                ft.Text(label, size=Typography.BODY, color=Colors.TEXT_PRIMARY,
+                        weight=Typography.MEDIUM, expand=True),
+                ft.Icon(ft.Icons.CHEVRON_RIGHT, size=18, color=Colors.TEXT_MUTED),
+            ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            padding=ft.Padding.symmetric(horizontal=Spacing.MD, vertical=12),
+            border_radius=Radius.MD,
+            bgcolor=Colors.BG_CARD,
+            border=ft.Border.all(1, Colors.BORDER),
+            on_click=lambda _: on_tap(),
+            ink=True,
+            margin=ft.Margin.only(bottom=Spacing.XS),
+        )
+
+    menu_section = ft.Column([
+        _menu_item(ft.Icons.BAR_CHART_ROUNDED,       "Báo cáo",      Colors.PRIMARY,    lambda: on_navigate("report")),
+_menu_item(ft.Icons.SETTINGS_OUTLINED,        "Cài đặt",      Colors.ACCENT_CYAN, lambda: on_navigate("settings")),
+        _menu_item(ft.Icons.ADD_CHART_ROUNDED,        "Tạo Demo Data",Colors.SUCCESS,    lambda: _do_seed(None)),
+        _menu_item(ft.Icons.LOGOUT_ROUNDED,           "Đăng xuất",    Colors.ERROR,       on_logout if on_logout else (lambda: None)),
+    ], spacing=0, tight=True)
 
     body = ft.Column([
         ft.Container(
             content=ft.Row([
-                ft.Text("Hồ sơ", size=Typography.H2, color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
+                ft.Text(t("profile"), size=Typography.H2, color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
                 ft.Container(expand=True),
                 btn_settings
             ]),
@@ -194,18 +211,15 @@ def build_profile_screen(page: ft.Page, user, on_navigate, on_logout=None):
             content=ft.Column([
                 simple_profile,
                 ft.Container(height=Spacing.MD),
-                ft.Text("Báo cáo", size=Typography.H4, color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
                 stats_row,
-                ft.Container(height=Spacing.MD),
-                ft.Text("Thành tựu", size=Typography.H4, color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
+                ft.Container(height=Spacing.LG),
+                ft.Text(t("achievements"), size=Typography.H4, color=Colors.TEXT_PRIMARY,
+                        weight=Typography.BOLD),
+                ft.Container(height=Spacing.SM),
                 achievements,
-                ft.Container(height=Spacing.MD),
-                demo_btn,
-                ft.Container(height=Spacing.MD),
-                logout_btn,
                 ft.Container(height=Spacing.XXXL),
                 ft.Container(height=Spacing.XXXL),
-            ], spacing=Spacing.SM),
+            ], spacing=Spacing.XS),
             padding=ft.Padding.symmetric(horizontal=Spacing.MD),
         )
     ], spacing=0, tight=True, scroll=ft.ScrollMode.AUTO, expand=True)

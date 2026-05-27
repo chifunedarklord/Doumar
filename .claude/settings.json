@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from core.database import Storage; print\\(hasattr\\(Storage, 'save_work_session'\\)\\)\")",
+      "Bash(python -c ' *)"
+    ]
+  }
+}
