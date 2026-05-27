@@ -1,9 +1,37 @@
-flet>=0.21.0
-google-genai
-pytesseract
-Pillow
-plyer
-sqlalchemy>=2.0.0
-pyodbc
-python-dotenv
-bcrypt
+# ── Core UI ───────────────────────────────────────────────────
+flet>=0.84.0
+
+# ── AI / Gemini ────────────────────────────────────────────────
+google-genai>=1.68.0
+
+# ── Database ───────────────────────────────────────────────────
+SQLAlchemy>=2.0.0
+pyodbc>=5.0.0
+
+# ── Auth ───────────────────────────────────────────────────────
+bcrypt>=4.0.0
+
+# ── Voice Input (ghi âm + nhận dạng giọng nói) ────────────────
+sounddevice>=0.4.0
+SpeechRecognition>=3.10.0
+numpy>=1.24.0
+
+# ── Voice Output / TTS ─────────────────────────────────────────
+gTTS>=2.3.0
+pygame>=2.5.0
+pyttsx3>=2.90
+
+# ── OCR (quét ảnh → task) ──────────────────────────────────────
+pytesseract>=0.3.10
+Pillow>=10.0.0
+
+# ── File Analysis (xlsx / pdf / docx) ─────────────────────────
+openpyxl>=3.1.0
+pdfplumber>=0.10.0
+python-docx>=1.1.0
+
+# ── Notifications ──────────────────────────────────────────────
+plyer>=2.1.0
+
+# ── Utilities ──────────────────────────────────────────────────
+python-dotenv>=1.0.0
