@@ -459,6 +459,86 @@ def build_dashboard(page: ft.Page, user, on_navigate):
           )]),
     ], spacing=0, tight=True)
 
+    # ── AI Schedule Today card ────────────────────────────────
+    # Bấm chip → set pending prompt → navigate sang AI chat → tự gửi
+    _SCHED_PROMPTS = {
+        "optimize":
+            "Sắp xếp lại lịch và tối ưu hóa các công việc hôm nay cho tôi. "
+            "Hãy xem xét deadline, giờ vàng tập trung và năng lượng hiện tại của tôi "
+            "rồi đề xuất timeline cụ thể theo từng giờ.",
+        "priority":
+            "Ưu tiên và sắp xếp kế hoạch các task hôm nay theo tầm quan trọng và deadline. "
+            "Việc nào khẩn cấp nhất? Lên lịch cụ thể cho từng task.",
+        "what_first":
+            "Việc nào tôi nên làm trước tiên trong hôm nay? "
+            "Phân tích toàn bộ task và lập kế hoạch chi tiết theo thứ tự ưu tiên.",
+    }
+
+    def _go_to_ai(mode: str):
+        from screens.ai_screen import set_pending_prompt as _spp
+        _spp(_SCHED_PROMPTS.get(mode, _SCHED_PROMPTS["optimize"]))
+        on_navigate("ai")
+
+    def _sched_chip(label: str, mode: str, primary: bool = False):
+        return ft.GestureDetector(
+            on_tap=lambda _: _go_to_ai(mode),
+            content=ft.Container(
+                content=ft.Text(label, size=Typography.TINY,
+                                color="white" if primary else Colors.PRIMARY,
+                                weight=Typography.SEMIBOLD),
+                padding=ft.padding.symmetric(horizontal=12, vertical=7),
+                border_radius=Radius.FULL,
+                gradient=ft.LinearGradient(
+                    colors=["#A855F7", "#3B82F6"],
+                    begin=ft.Alignment.CENTER_LEFT,
+                    end=ft.Alignment.CENTER_RIGHT,
+                ) if primary else None,
+                bgcolor=None if primary else Colors.PRIMARY_BG,
+                border=ft.Border.all(1, Colors.PRIMARY_BORDER) if not primary else None,
+                shadow=ft.BoxShadow(blur_radius=8, color="#40A855F7",
+                                    offset=ft.Offset(0, 2)) if primary else None,
+            ),
+        )
+
+    ai_schedule_card = ft.Container(
+        content=ft.Column([
+            ft.Row([
+                ft.Container(
+                    content=ft.Row([
+                        ft.Text("✨", size=14),
+                        ft.Text("AI Sắp xếp hôm nay", size=Typography.BODY,
+                                color="white", weight=Typography.BOLD),
+                    ], spacing=6, tight=True),
+                    padding=ft.padding.symmetric(horizontal=0),
+                    expand=True,
+                ),
+                ft.Icon(ft.Icons.AUTO_AWESOME_ROUNDED, size=16,
+                        color="rgba(255,255,255,0.6)"),
+            ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ft.Container(height=4),
+            ft.Text(
+                "Doumar phân tích deadline, năng lượng & giờ vàng của bạn → đề xuất timeline tối ưu",
+                size=Typography.TINY, color="rgba(255,255,255,0.75)",
+                max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
+            ),
+            ft.Container(height=Spacing.SM),
+            ft.Row([
+                _sched_chip("🗓️ Sắp xếp hôm nay",       "optimize",   primary=True),
+                _sched_chip("🎯 Ưu tiên task",           "priority"),
+                _sched_chip("❓ Làm gì trước?",           "what_first"),
+            ], spacing=6, wrap=True),
+        ], spacing=0, tight=True),
+        padding=ft.padding.symmetric(horizontal=Spacing.MD, vertical=Spacing.MD),
+        border_radius=Radius.LG,
+        gradient=ft.LinearGradient(
+            colors=["#1E1B4B", "#312E81", "#1E1B4B"],
+            begin=ft.Alignment.TOP_LEFT,
+            end=ft.Alignment.BOTTOM_RIGHT,
+        ),
+        border=ft.Border.all(1, "#5B21B6"),
+        shadow=ft.BoxShadow(blur_radius=16, color="#40A855F7", offset=ft.Offset(0, 4)),
+    )
+
     # ── Assemble ──────────────────────────────────────────────
     main_items = [
         header,
@@ -469,6 +549,8 @@ def build_dashboard(page: ft.Page, user, on_navigate):
                 ft.Container(height=Spacing.SM),
                 ai_insights_card,
                 *([] if not advice_banner else [ft.Container(height=Spacing.SM), advice_banner]),
+                ft.Container(height=Spacing.SM),
+                ai_schedule_card,
                 ft.Container(height=Spacing.LG),
                 priority_section,
                 ft.Container(height=Spacing.LG),

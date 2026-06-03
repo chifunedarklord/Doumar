@@ -408,6 +408,12 @@ _current_page     = [None]   # module-level refs for save task callbacks
 _current_user_id  = [""]
 _current_navigate = [None]
 _current_plan_data = [None]  # persists last plan across navigation
+_pending_prompt   = [None]   # auto-send on next screen load (set from other screens)
+
+
+def set_pending_prompt(text: str):
+    """Đặt tin nhắn sẽ tự động gửi khi AI screen được mở kế tiếp."""
+    _pending_prompt[0] = text
 
 
 def build_ai_screen(page: ft.Page, user, on_navigate):
@@ -1917,5 +1923,27 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
     ], spacing=0, tight=True, expand=True)
 
     _load_active_session()
+
+    # ── Auto-send pending prompt (từ dashboard / tasks screen) ──
+    if _pending_prompt[0]:
+        _auto_msg = _pending_prompt[0]
+        _pending_prompt[0] = None          # consume ngay để không lặp lại
+
+        def _auto_send():
+            import time as _t
+            _t.sleep(0.3)                  # đợi UI render xong
+            _add_to_chat(_bubble(_auto_msg, is_user=True))
+            if _state["session_id"]:
+                ChatService.add_message(user.id, _state["session_id"], "user", _auto_msg)
+            _load_sessions_ui()
+            try: page.update()
+            except Exception: pass
+            from core.ai_planner_service import detect_plan_intent
+            if detect_plan_intent(_auto_msg):
+                _run_plan_reply(_auto_msg, last_plan=None)
+            else:
+                _run_text_reply(_auto_msg)
+
+        threading.Thread(target=_auto_send, daemon=True).start()
 
     return ft.Row([main_chat, history_panel], expand=True, spacing=0)

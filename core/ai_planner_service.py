@@ -416,3 +416,252 @@ def _make_fallback_plan(message: str, intent: str = None) -> dict:
         "follow_up_question": "Bạn muốn mình chỉnh kế hoạch chi tiết hơn theo phần nào?",
         "refine_options": refine_opts,
     }
+
+
+# ── AI Schedule Today ─────────────────────────────────────────────────────────
+
+def get_ai_schedule_today(user_id: str, mode: str = "optimize") -> dict:
+    """
+    Lấy danh sách task chưa hoàn thành và yêu cầu Gemini tạo timeline tối ưu cho hôm nay.
+    mode: "optimize" | "priority" | "what_first"
+    Returns dict với key "type": "schedule_result" | "error".
+    Never raises.
+    """
+    from datetime import date as _date, timedelta as _td
+    today_str = _date.today().isoformat()
+
+    try:
+        from utils.ai_helper import _API_KEY, _MODEL_CHAIN, _call_gemini, _get_cached_context
+        from core.services import TaskService as _TS, AIMemoryService as _AMS, BehaviorService as _BS
+    except Exception as _e:
+        return {"type": "error", "message": f"Import thất bại: {str(_e)[:80]}"}
+
+    # ── Collect tasks ─────────────────────────────────────────
+    try:
+        all_tasks = _TS.get_tasks(user_id)
+    except Exception:
+        all_tasks = []
+
+    active = [t for t in all_tasks if t.status not in ("done", "cancelled")]
+    # Prioritise: overdue > today > upcoming 3 days > rest
+    overdue   = [t for t in active if t.is_overdue]
+    today_t   = [t for t in active if t.due_date == today_str and not t.is_overdue]
+    soon_t    = sorted(
+        [t for t in active
+         if t.due_date and today_str < t.due_date <= (_date.today() + _td(days=3)).isoformat()],
+        key=lambda t: t.due_date,
+    )
+    no_date_t = [t for t in active if not t.due_date][:3]
+    candidate_tasks = (overdue + today_t + soon_t + no_date_t)[:12]
+
+    if not candidate_tasks:
+        return {
+            "type": "schedule_result",
+            "summary": "Không có task nào cần làm hôm nay. Tuyệt vời! 🎉",
+            "total_focus_minutes": 0,
+            "slots": [],
+            "unscheduled": [],
+            "tips": ["Đây là thời điểm tốt để lên kế hoạch cho tuần tới."],
+        }
+
+    # ── User context ──────────────────────────────────────────
+    try:
+        peak_hours = _BS.get_peak_hours(user_id) or [9, 10, 14]
+        energy_val = int(_AMS.recall_value(user_id, "state", "estimated_energy") or 7)
+        stress_val = int(_AMS.recall_value(user_id, "state", "estimated_stress") or 5)
+    except Exception:
+        peak_hours, energy_val, stress_val = [9, 10, 14], 7, 5
+
+    try:
+        from core.database import Storage as _Stor
+        all_users = _Stor.get_users()
+        _user = next((u for u in all_users if u.id == user_id), None)
+        work_start = getattr(_user, "work_start", "08:00") if _user else "08:00"
+        work_end   = getattr(_user, "work_end",   "18:00") if _user else "18:00"
+    except Exception:
+        work_start, work_end = "08:00", "18:00"
+
+    peak_str = ", ".join(f"{h:02d}:00" for h in sorted(peak_hours)[:4]) or "09:00, 10:00"
+
+    # ── Build task list for prompt ────────────────────────────
+    pri_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+    energy_icon = {"high": "⚡⚡", "medium": "⚡", "low": "💤"}
+
+    def _task_line(t) -> str:
+        days = t.days_until_due
+        due_info = ""
+        if days is not None:
+            if days < 0:    due_info = f" [QUÁ HẠN {abs(days)} ngày]"
+            elif days == 0: due_info = " [hạn hôm nay]"
+            else:           due_info = f" [còn {days} ngày]"
+        est = getattr(t, "estimated_minutes", 30)
+        enr = energy_icon.get(getattr(t, "energy_required", "medium"), "⚡")
+        return (f"- {pri_icon.get(t.priority,'⚪')} [{t.id[:8]}] {t.title}{due_info}"
+                f" | {est}p | {enr} | cat:{t.category}")
+
+    task_lines = "\n".join(_task_line(t) for t in candidate_tasks)
+
+    mode_instruction = {
+        "optimize":   "Tối ưu lịch để cân bằng tất cả task theo năng lượng và giờ vàng.",
+        "priority":   "Ưu tiên tuyệt đối task quan trọng và quá hạn, đặt vào đầu ngày.",
+        "what_first": "Phân tích rõ task nào nên làm TRƯỚC TIÊN và lý do cụ thể.",
+    }.get(mode, "Tối ưu lịch theo năng lượng và deadline.")
+
+    prompt = f"""Bạn là AI lập lịch thông minh của TaskFlow. Hôm nay: {today_str}.
+
+THÔNG TIN NGƯỜI DÙNG:
+- Giờ vàng tập trung: {peak_str}
+- Năng lượng hiện tại: {energy_val}/10 {"(thấp → chỉ task nhẹ trước)" if energy_val <= 3 else ""}
+- Stress: {stress_val}/10 {"(cao → thêm nghỉ giữa các slot)" if stress_val >= 7 else ""}
+- Giờ làm việc: {work_start} – {work_end}
+
+YÊU CẦU: {mode_instruction}
+
+DANH SÁCH TASK (id ngắn | tên | deadline | ước tính | năng lượng | category):
+{task_lines}
+
+Trả về JSON thuần túy (không markdown, không backtick):
+{{
+  "type": "schedule_result",
+  "summary": "Tóm tắt 1-2 câu về lịch hôm nay và lý do sắp xếp",
+  "total_focus_minutes": 180,
+  "slots": [
+    {{
+      "start": "08:00",
+      "end": "09:30",
+      "task_title": "tên task (có thể rút gọn)",
+      "task_id_short": "8 ký tự đầu id hoặc null",
+      "priority": "high|medium|low",
+      "energy_required": "high|medium|low",
+      "reason": "lý do ngắn (≤10 từ)",
+      "category": "work|personal|health|finance|education",
+      "is_overdue": false
+    }}
+  ],
+  "unscheduled": ["tên task không sắp xếp được hôm nay"],
+  "tips": ["mẹo tập trung 1", "mẹo tập trung 2"]
+}}
+
+NGUYÊN TẮC BẮT BUỘC:
+1. Task quá hạn → xếp NGAY ĐẦU TIÊN, priority tuyệt đối
+2. Task khó/năng lượng cao ⚡⚡ → xếp vào giờ vàng ({peak_str})
+3. Task nhẹ 💤 → chiều hoặc sau giờ nghỉ
+4. Giữa các slot ≥10 phút nghỉ (không nhét sát nhau)
+5. Nếu năng lượng ≤3: chỉ xếp task nhẹ, tối đa 3 slot
+6. Tổng thời gian trong {work_start}–{work_end}, không vượt khung giờ
+7. Mỗi slot tối đa 90 phút — task dài hơn thì chia 2 slot
+8. Nếu không đủ thời gian: đưa vào "unscheduled"
+9. JSON thuần túy — KHÔNG backtick, KHÔNG markdown"""
+
+    if not _API_KEY:
+        return _make_fallback_schedule(candidate_tasks, peak_hours, work_start)
+
+    try:
+        from google import genai
+        from google.genai import types
+        import time as _time
+
+        client = genai.Client(api_key=_API_KEY)
+        contents = [types.Content(
+            role="user", parts=[types.Part.from_text(text=prompt)]
+        )]
+
+        last_err = None
+        for model in _MODEL_CHAIN:
+            for attempt in range(2):
+                try:
+                    resp = _call_gemini(client, model, contents, "")
+                    raw = resp.text.strip()
+                    raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
+                    j = re.search(r"\{[\s\S]*\}", raw)
+                    if j:
+                        data = json.loads(j.group(0))
+                        if data.get("type") == "schedule_result":
+                            return data
+                except Exception as e:
+                    last_err = str(e)
+                    if attempt == 0:
+                        _time.sleep(0.8)
+
+        logger.warning("schedule: all models failed: %s", last_err)
+        return _make_fallback_schedule(candidate_tasks, peak_hours, work_start)
+
+    except Exception:
+        logger.exception("get_ai_schedule_today unexpected error")
+        return _make_fallback_schedule(candidate_tasks, peak_hours, work_start)
+
+
+def _make_fallback_schedule(tasks: list, peak_hours: list, work_start: str = "08:00") -> dict:
+    """Fallback schedule when AI is unavailable — rule-based ordering."""
+    from datetime import date as _date
+    today_str = _date.today().isoformat()
+
+    try:
+        start_h = int(work_start.split(":")[0])
+    except Exception:
+        start_h = 8
+
+    # Sort: overdue > today > priority > estimated time
+    pri_order = {"high": 0, "medium": 1, "low": 2}
+    sorted_tasks = sorted(
+        tasks,
+        key=lambda t: (
+            0 if t.is_overdue else (1 if t.due_date == today_str else 2),
+            pri_order.get(t.priority, 1),
+            getattr(t, "estimated_minutes", 30),
+        ),
+    )
+
+    peak_set = set(peak_hours or [9, 10])
+    slots = []
+    cur_h, cur_m = start_h, 0
+    total_mins = 0
+
+    for task in sorted_tasks[:6]:
+        est = min(getattr(task, "estimated_minutes", 30), 90)
+        # Snap to peak hour if upcoming
+        for offset in range(3):
+            candidate = cur_h + offset
+            if candidate in peak_set and task.priority == "high":
+                cur_h = candidate; cur_m = 0
+                break
+
+        start_str = f"{cur_h:02d}:{cur_m:02d}"
+        end_m = cur_m + est
+        end_h = cur_h + end_m // 60
+        end_m = end_m % 60
+        if end_h >= 20:
+            break
+        end_str = f"{end_h:02d}:{end_m:02d}"
+
+        slots.append({
+            "start": start_str,
+            "end": end_str,
+            "task_title": task.title,
+            "task_id_short": task.id[:8] if task.id else None,
+            "priority": task.priority,
+            "energy_required": getattr(task, "energy_required", "medium"),
+            "reason": "Quá hạn — ưu tiên ngay" if task.is_overdue else "Theo độ ưu tiên",
+            "category": task.category,
+            "is_overdue": task.is_overdue,
+        })
+        total_mins += est
+        # Advance cursor: add break
+        break_m = 15 if est >= 60 else 10
+        total_end_m = end_m + break_m
+        cur_h = end_h + total_end_m // 60
+        cur_m = total_end_m % 60
+
+    unscheduled = [t.title for t in sorted_tasks[len(slots):]]
+
+    return {
+        "type": "schedule_result",
+        "summary": f"Lịch tự động cho {len(slots)} task — AI đang offline, dùng sắp xếp theo độ ưu tiên.",
+        "total_focus_minutes": total_mins,
+        "slots": slots,
+        "unscheduled": unscheduled,
+        "tips": [
+            "Tập trung 1 task mỗi lần — không đa nhiệm.",
+            "Dùng Focus Timer để tính thời gian thực tế.",
+        ],
+    }
