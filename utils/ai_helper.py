@@ -29,7 +29,7 @@ _load_dotenv()
 _MODEL_CHAIN = [
     "gemini-2.5-flash",
     "gemini-2.0-flash",
-    "gemini-1.5-flash",
+    "gemini-2.0-flash-lite",
 ]
 _API_KEY = os.getenv("GEMINI_API_KEY", "")
 if not _API_KEY:

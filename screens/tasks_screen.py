@@ -22,6 +22,8 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
     filter_cat    = {"v": "all"}
     filter_status = {"v": "all"}
     filter_pri    = {"v": "all"}
+    sort_mode     = {"v": "default"}   # "default" | "priority"
+
     def get_filtered_tasks():
         tasks = TaskService.get_tasks(user.id)
         q = search_val["v"].lower()
@@ -33,9 +35,20 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
             tasks = [tk for tk in tasks if tk.status == filter_status["v"]]
         if filter_pri["v"] != "all":
             tasks = [tk for tk in tasks if tk.priority == filter_pri["v"]]
-        def sort_key(tk: Task):
-            pri_order = {"high": 0, "medium": 1, "low": 2}
-            return (0 if tk.is_overdue else 1, tk.due_date or "9999", pri_order.get(tk.priority, 1))
+
+        pri_order = {"high": 0, "medium": 1, "low": 2}
+        if sort_mode["v"] == "priority":
+            # Ưu tiên cao lên đầu, xong xuống cuối, quá hạn trên cùng
+            def sort_key(tk: Task):
+                done_last  = 1 if tk.status == "done" else 0
+                overdue    = 0 if tk.is_overdue else 1
+                return (done_last, overdue, pri_order.get(tk.priority, 1),
+                        tk.due_date or "9999")
+        else:
+            def sort_key(tk: Task):
+                return (0 if tk.is_overdue else 1,
+                        tk.due_date or "9999",
+                        pri_order.get(tk.priority, 1))
         return sorted(tasks, key=sort_key)
 
     def refresh_list():
@@ -212,10 +225,10 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
         def _end_session(_=None):
             if not timer_state["running"]:
                 return
-            timer_state["running"] = False          # stops _tick immediately
+            timer_state["running"] = False
             elapsed_mins = max(1, timer_state["elapsed"] // 60)
 
-            # Swap button back → start (show briefly before closing)
+            # Show success feedback immediately before DB ops
             action_btn.content = ft.Row([
                 ft.Icon(ft.Icons.CHECK_ROUNDED, color="white", size=20),
                 ft.Text(t("focus_saved", n=elapsed_mins, q=quality_state["v"]),
@@ -229,38 +242,39 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
             except Exception:
                 pass
 
-            # Save work session
-            try:
-                from core.database import Storage as _Storage
-                from core.models import WorkSession as _WSM
-                now_str = _dt.now().isoformat()
-                ws = _WSM(
-                    id=timer_state["session_id"],
-                    user_id=user.id,
-                    task_id=task.id,
-                    started_at=(_dt.fromtimestamp(timer_state["start_time"]).isoformat()
-                                if timer_state["start_time"] else now_str),
-                    ended_at=now_str,
-                    duration_minutes=elapsed_mins,
-                    focus_quality=quality_state["v"],
-                    notes="",
-                )
-                _Storage.save_work_session(ws)
-                task.actual_minutes = getattr(task, "actual_minutes", 0) + elapsed_mins
-                task.updated_at = now_str
-                TaskService.save_task(task)
-            except Exception as _e:
-                import logging
-                logging.getLogger(__name__).error("Focus timer save error: %s", _e)
+            # DB save + close in background so button feedback renders first
+            def _finish():
+                try:
+                    from core.database import Storage as _Storage
+                    from core.models import WorkSession as _WSM
+                    now_str = _dt.now().isoformat()
+                    ws = _WSM(
+                        id=timer_state["session_id"],
+                        user_id=user.id,
+                        task_id=task.id,
+                        started_at=(_dt.fromtimestamp(timer_state["start_time"]).isoformat()
+                                    if timer_state["start_time"] else now_str),
+                        ended_at=now_str,
+                        duration_minutes=elapsed_mins,
+                        focus_quality=quality_state["v"],
+                        notes="",
+                    )
+                    _Storage.save_work_session(ws)
+                    task.actual_minutes = getattr(task, "actual_minutes", 0) + elapsed_mins
+                    task.updated_at = now_str
+                    TaskService.save_task(task)
+                except Exception as _e:
+                    import logging
+                    logging.getLogger(__name__).error("Focus timer save error: %s", _e)
+                _time.sleep(0.6)
+                timer_bs[0].open = False
+                try:
+                    page.update()
+                except Exception:
+                    pass
+                refresh_list()
 
-            # Close sheet after brief feedback
-            _time.sleep(0.7)
-            timer_bs[0].open = False
-            try:
-                page.update()
-            except Exception:
-                pass
-            refresh_list()
+            _th.Thread(target=_finish, daemon=True).start()
 
         # Wire initial start state
         action_btn.content = ft.Row([
@@ -1060,238 +1074,30 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
         page.overlay.append(cbs)
         page.update()
 
-    # ── AI Schedule → navigate to AI chat with pending prompt ──
+    # ── Priority sort toggle ──────────────────────────────────
+    sort_btn_ref = ft.Ref[ft.Container]()
+
     def _open_ai_schedule_sheet(_=None):
-        from screens.ai_screen import set_pending_prompt as _spp
-        _spp(
-            "Sắp xếp lại lịch và tối ưu hóa các công việc hôm nay cho tôi. "
-            "Xem xét deadline, giờ vàng tập trung và năng lượng hiện tại "
-            "rồi đề xuất timeline cụ thể theo từng giờ."
-        )
-        on_navigate("ai")
+        if sort_mode["v"] == "priority":
+            sort_mode["v"] = "default"
+            _msg = "Đã khôi phục sắp xếp mặc định"
+            _active = False
+        else:
+            sort_mode["v"] = "priority"
+            _msg = "✨ Đã sắp xếp theo độ ưu tiên — xong xuống cuối"
+            _active = True
 
-    if False:  # dead code block — kept only for reference, never called
-     def _open_ai_schedule_sheet_unused(_=None):
-        import threading as _th
-        from core.ai_planner_service import get_ai_schedule_today as _get_sched
-
-        schedule_bs = [None]
-        result_col = ft.Column(
-            [ft.Container(
-                content=ft.Row([
-                    ft.ProgressRing(width=22, height=22, stroke_width=2.5,
-                                    color=Colors.PRIMARY),
-                    ft.Text("Doumar đang phân tích task...",
-                            size=Typography.SMALL, color=Colors.TEXT_MUTED),
-                ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                padding=ft.padding.all(Spacing.LG),
-                alignment=ft.Alignment.CENTER,
-            )],
-            spacing=0, tight=True,
-        )
-
-        cat_colors = {
-            "work": Colors.PRIMARY, "health": Colors.SUCCESS,
-            "education": "#8B5CF6", "finance": Colors.WARNING,
-            "personal": Colors.ACCENT_CYAN,
-        }
-        pri_dot = {"high": Colors.ERROR, "medium": Colors.WARNING, "low": Colors.SUCCESS}
-        energy_label = {"high": "⚡⚡", "medium": "⚡", "low": "💤"}
-
-        def _build_timeline(data: dict):
-            slots       = data.get("slots", [])
-            unscheduled = data.get("unscheduled", [])
-            tips        = data.get("tips", [])
-            summary     = data.get("summary", "")
-            total_mins  = data.get("total_focus_minutes", 0)
-            controls    = []
-
-            h_str = f"{total_mins // 60}g{total_mins % 60:02d}" if total_mins >= 60 else f"{total_mins}p"
-            controls.append(ft.Container(
-                content=ft.Row([
-                    ft.Text(summary, size=Typography.TINY, color=Colors.TEXT_SECONDARY,
-                            expand=True, max_lines=3, overflow=ft.TextOverflow.ELLIPSIS),
-                    ft.Container(
-                        content=ft.Column([
-                            ft.Text(h_str, size=Typography.BODY, color=Colors.PRIMARY,
-                                    weight=Typography.BOLD, text_align=ft.TextAlign.CENTER),
-                            ft.Text("focus", size=7, color=Colors.TEXT_MUTED,
-                                    text_align=ft.TextAlign.CENTER),
-                        ], spacing=0, tight=True,
-                           horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-                        padding=ft.padding.symmetric(horizontal=10, vertical=6),
-                        border_radius=Radius.MD,
-                        bgcolor=Colors.PRIMARY_BG,
-                        border=ft.Border.all(1, Colors.PRIMARY_BORDER),
-                    ),
-                ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.START),
-                padding=ft.padding.only(bottom=Spacing.SM),
-            ))
-
-            if not slots:
-                controls.append(ft.Container(
-                    content=ft.Text("🎉 Không có task nào — nghỉ ngơi thôi!",
-                                    size=Typography.BODY, color=Colors.SUCCESS,
-                                    text_align=ft.TextAlign.CENTER),
-                    padding=ft.padding.symmetric(vertical=Spacing.LG),
-                    alignment=ft.Alignment.CENTER,
-                ))
-            else:
-                for slot in slots:
-                    is_overdue = slot.get("is_overdue", False)
-                    cat   = slot.get("category", "personal")
-                    pri   = slot.get("priority", "medium")
-                    enr   = slot.get("energy_required", "medium")
-                    title = slot.get("task_title", "")
-                    reason = slot.get("reason", "")
-                    accent = cat_colors.get(cat, Colors.PRIMARY)
-
-                    controls.append(ft.Container(
-                        content=ft.Row([
-                            ft.Column([
-                                ft.Text(slot.get("start", ""), size=Typography.TINY,
-                                        color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
-                                ft.Text(slot.get("end", ""), size=8, color=Colors.TEXT_MUTED),
-                            ], width=42, spacing=1, tight=True,
-                               horizontal_alignment=ft.CrossAxisAlignment.END),
-                            ft.Container(
-                                width=3, border_radius=Radius.FULL,
-                                bgcolor=Colors.ERROR if is_overdue else accent,
-                                margin=ft.margin.symmetric(horizontal=6),
-                                expand_loose=True,
-                            ),
-                            ft.Column([
-                                ft.Row([
-                                    ft.Text(title, size=Typography.SMALL,
-                                            color=Colors.TEXT_PRIMARY, weight=Typography.SEMIBOLD,
-                                            expand=True, max_lines=1,
-                                            overflow=ft.TextOverflow.ELLIPSIS),
-                                    ft.Container(width=7, height=7, border_radius=4,
-                                                 bgcolor=pri_dot.get(pri, Colors.TEXT_MUTED)),
-                                ], spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                                ft.Text(
-                                    f"{energy_label.get(enr, '')}  {reason}",
-                                    size=7, color=Colors.TEXT_MUTED, max_lines=1,
-                                    overflow=ft.TextOverflow.ELLIPSIS,
-                                ),
-                            ], spacing=2, tight=True, expand=True),
-                        ], spacing=0, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                        padding=ft.padding.symmetric(vertical=10, horizontal=10),
-                        border_radius=Radius.MD,
-                        bgcolor=f"#18{Colors.ERROR[1:]}" if is_overdue else Colors.BG_CARD,
-                        border=ft.Border.all(
-                            1, f"#40{Colors.ERROR[1:]}" if is_overdue else Colors.BORDER),
-                        margin=ft.margin.only(bottom=6),
-                        on_click=lambda _: None, ink=True,
-                    ))
-
-            if unscheduled:
-                controls.append(ft.Container(height=Spacing.XS))
-                controls.append(ft.Container(
-                    content=ft.Column([
-                        ft.Text(f"Chưa sắp xếp được: {', '.join(unscheduled[:3])}",
-                                size=Typography.TINY, color=Colors.TEXT_MUTED,
-                                max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
-                    ], spacing=2, tight=True),
-                    padding=ft.padding.symmetric(horizontal=10, vertical=6),
-                    border_radius=Radius.SM, bgcolor=Colors.BG_SURFACE,
-                    border=ft.Border.all(1, Colors.BORDER),
-                ))
-
-            for tip in tips[:2]:
-                controls.append(ft.Container(
-                    content=ft.Row([
-                        ft.Text("💡", size=10),
-                        ft.Text(tip, size=Typography.TINY, color=Colors.TEXT_SECONDARY,
-                                expand=True, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
-                    ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.START),
-                    padding=ft.padding.symmetric(horizontal=10, vertical=5),
-                    border_radius=Radius.SM,
-                    bgcolor=f"#10{Colors.WARNING[1:]}",
-                    border=ft.Border.all(1, f"#28{Colors.WARNING[1:]}"),
-                    margin=ft.margin.only(top=4, bottom=2),
-                ))
-
-            return controls
-
-        def _worker():
-            try:
-                data = _get_sched(user.id, mode="optimize")
-            except Exception as _ex:
-                data = {"type": "error", "message": str(_ex)[:120]}
-            new_controls = (
-                [ft.Container(
-                    content=ft.Text(f"❌ {data.get('message','Lỗi')}",
-                                    size=Typography.SMALL, color=Colors.ERROR),
-                    padding=ft.padding.all(Spacing.LG),
-                )]
-                if data.get("type") == "error"
-                else _build_timeline(data)
+        # Update button appearance
+        if sort_btn_ref.current:
+            sort_btn_ref.current.gradient = ft.LinearGradient(
+                colors=["#059669", "#0D9488"] if _active else ["#374151", "#4B5563"],
+                begin=ft.Alignment.TOP_LEFT, end=ft.Alignment.BOTTOM_RIGHT,
             )
-            result_col.controls = new_controls
-            try: page.update()
+            try: sort_btn_ref.current.update()
             except Exception: pass
 
-        _th.Thread(target=_worker, daemon=True).start()
-
-        sheet = ft.Column([
-            ft.Container(
-                content=ft.Container(width=40, height=4, border_radius=Radius.FULL,
-                                     bgcolor="#444444"),
-                alignment=ft.Alignment.CENTER,
-                padding=ft.padding.only(top=12, bottom=8),
-            ),
-            ft.Container(
-                content=ft.Column([
-                    ft.Row([
-                        ft.Container(
-                            content=ft.Text("✨", size=18),
-                            width=36, height=36, border_radius=Radius.SM,
-                            gradient=ft.LinearGradient(
-                                colors=["#A855F7", "#3B82F6"],
-                                begin=ft.Alignment.TOP_LEFT,
-                                end=ft.Alignment.BOTTOM_RIGHT,
-                            ),
-                            alignment=ft.Alignment.CENTER,
-                        ),
-                        ft.Column([
-                            ft.Text("🗓️ AI Sắp xếp hôm nay", size=Typography.H3,
-                                    color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
-                            ft.Text("Doumar · AI Schedule",
-                                    size=Typography.TINY, color=Colors.TEXT_MUTED),
-                        ], spacing=1, tight=True, expand=True),
-                        ft.Container(
-                            content=ft.Icon(ft.Icons.CLOSE_ROUNDED, size=16,
-                                            color=Colors.TEXT_MUTED),
-                            width=30, height=30, border_radius=Radius.SM,
-                            bgcolor=Colors.BG_SURFACE, alignment=ft.Alignment.CENTER,
-                            on_click=lambda _: [
-                                setattr(schedule_bs[0], "open", False), page.update()
-                            ],
-                            ink=True,
-                        ),
-                    ], spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                    ft.Container(height=Spacing.SM),
-                    ft.Container(content=result_col, height=430,
-                                 clip_behavior=ft.ClipBehavior.HARD_EDGE),
-                    ft.Container(height=Spacing.XL),
-                ], spacing=0, tight=True),
-                padding=ft.padding.symmetric(horizontal=Spacing.LG),
-            ),
-        ], spacing=0, tight=True, scroll=ft.ScrollMode.AUTO)
-
-        tbs = ft.BottomSheet(
-            content=ft.Container(
-                content=sheet, bgcolor=Colors.BG_CARD,
-                border_radius=ft.BorderRadius.only(
-                    top_left=Radius.XL, top_right=Radius.XL),
-                padding=0, clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-            ),
-            open=True, draggable=True, use_safe_area=True,
-        )
-        schedule_bs[0] = tbs
-        page.overlay.append(tbs)
-        page.update()
+        refresh_list()
+        snack(page, _msg)
 
     # ── Header ────────────────────────────────────────────────
     header = ft.Container(
@@ -1303,9 +1109,10 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
                         size=Typography.SMALL, color=Colors.TEXT_MUTED),
             ], spacing=2, tight=True),
             ft.Row([], expand=True),
-            # AI Schedule button
+            # Priority sort button
             ft.Container(
-                content=ft.Icon(ft.Icons.CALENDAR_MONTH_ROUNDED, color="white", size=16),
+                ref=sort_btn_ref,
+                content=ft.Icon(ft.Icons.SORT_ROUNDED, color="white", size=18),
                 width=38, height=38,
                 border_radius=Radius.MD,
                 gradient=ft.LinearGradient(
@@ -1316,7 +1123,7 @@ def build_tasks_screen(page: ft.Page, user, on_navigate):
                 alignment=ft.Alignment.CENTER,
                 on_click=_open_ai_schedule_sheet,
                 ink=True,
-                tooltip="AI Sắp xếp hôm nay",
+                tooltip="Sắp xếp theo độ ưu tiên",
                 margin=ft.margin.only(right=6),
             ),
             # AI Quick-add button

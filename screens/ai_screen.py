@@ -57,13 +57,11 @@ def _render_plan_card(plan: dict, on_save_tasks, on_refine) -> ft.Container:
         ft.Row([
             ft.Text("📌", size=16),
             ft.Text(title, size=Typography.BODY, color=Colors.TEXT_PRIMARY,
-                    weight=Typography.BOLD, expand=True,
-                    max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
+                    weight=Typography.BOLD, expand=True),
         ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.START),
         ft.Row([intent_badge], spacing=0),
         ft.Container(height=4),
-        ft.Text(summary, size=Typography.TINY, color=Colors.TEXT_MUTED,
-                max_lines=3, overflow=ft.TextOverflow.ELLIPSIS),
+        ft.Text(summary, size=Typography.TINY, color=Colors.TEXT_MUTED),
     ], spacing=4, tight=True)
 
     # ── Assumptions ────────────────────────────────────────────
@@ -94,26 +92,23 @@ def _render_plan_card(plan: dict, on_save_tasks, on_refine) -> ft.Container:
         details    = step.get("details", [])
         return ft.Container(
             content=ft.Column([
-                ft.Row([
-                    ft.Container(
-                        content=ft.Text(time_label, size=8,
-                                        color=Colors.PRIMARY, weight=Typography.BOLD),
-                        padding=ft.padding.symmetric(horizontal=7, vertical=3),
-                        border_radius=Radius.FULL,
-                        bgcolor=Colors.PRIMARY_BG,
-                        border=ft.Border.all(1, Colors.PRIMARY_BORDER),
-                    ),
-                    ft.Text(step_title, size=Typography.SMALL,
-                            color=Colors.TEXT_PRIMARY, weight=Typography.SEMIBOLD,
-                            expand=True, max_lines=1,
-                            overflow=ft.TextOverflow.ELLIPSIS),
-                ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                # Time badge trên, title đầy đủ dưới — tránh bị squeeze trong Row
+                ft.Container(
+                    content=ft.Text(time_label, size=8,
+                                    color=Colors.PRIMARY, weight=Typography.BOLD),
+                    padding=ft.padding.symmetric(horizontal=7, vertical=3),
+                    border_radius=Radius.FULL,
+                    bgcolor=Colors.PRIMARY_BG,
+                    border=ft.Border.all(1, Colors.PRIMARY_BORDER),
+                ),
+                ft.Text(step_title, size=Typography.SMALL,
+                        color=Colors.TEXT_PRIMARY, weight=Typography.SEMIBOLD),
                 ft.Column([
                     ft.Text(f"  • {d}", size=Typography.TINY, color=Colors.TEXT_MUTED)
-                    for d in details[:4]
+                    for d in details
                 ], spacing=1, tight=True),
             ], spacing=3, tight=True),
-            padding=ft.padding.symmetric(vertical=5, horizontal=8),
+            padding=ft.padding.symmetric(vertical=6, horizontal=8),
             border_radius=Radius.SM,
             bgcolor=Colors.BG_SURFACE,
             border=ft.Border(left=ft.BorderSide(2, Colors.PRIMARY)),
@@ -136,7 +131,7 @@ def _render_plan_card(plan: dict, on_save_tasks, on_refine) -> ft.Container:
     def _checked_count():
         return sum(1 for s in task_checks.values() if s["v"])
 
-    def _save_one_task(td: dict):
+    def _save_one_task(td: dict, btn_ref: ft.Ref = None):
         from core.models import Task as _Task
         from core.services import TaskService as _TS
         try:
@@ -157,12 +152,26 @@ def _render_plan_card(plan: dict, on_save_tasks, on_refine) -> ft.Container:
             )
             _TS.save_task(new_t)
             snack(_current_page[0], t("saved_short", title=new_t.title[:30]))
-            # Navigate to tasks screen
-            try:
-                if _current_navigate[0]:
-                    _current_navigate[0]("tasks")
-            except Exception:
-                pass
+
+            # Xóa task đã lưu khỏi plan data → không re-hiện khi navigate về
+            if _current_plan_data[0] and isinstance(
+                    _current_plan_data[0].get("suggested_tasks"), list):
+                _current_plan_data[0]["suggested_tasks"] = [
+                    tk for tk in _current_plan_data[0]["suggested_tasks"]
+                    if tk.get("title") != td.get("title")
+                ]
+
+            # Đổi button → "✓ Đã lưu" tại chỗ
+            if btn_ref and btn_ref.current:
+                btn_ref.current.content = ft.Text(
+                    "✓", size=9, color=Colors.SUCCESS, weight=Typography.BOLD)
+                btn_ref.current.bgcolor = f"#15{Colors.SUCCESS[1:]}"
+                btn_ref.current.border = ft.Border.all(1, Colors.SUCCESS)
+                try:
+                    btn_ref.current.update()
+                except Exception:
+                    pass
+
         except Exception:
             logger.exception("Failed to save single task: %s", td.get("title"))
             snack(_current_page[0], t("save_error"))
@@ -173,7 +182,8 @@ def _render_plan_card(plan: dict, on_save_tasks, on_refine) -> ft.Container:
         pri_color = {"high": Colors.ERROR, "medium": Colors.WARNING,
                      "low": Colors.PRIMARY}.get(pri, Colors.PRIMARY)
         est     = td.get("estimated_minutes", 30)
-        check_ref = ft.Ref[ft.Container]()
+        check_ref   = ft.Ref[ft.Container]()
+        save_btn_ref = ft.Ref[ft.Container]()
         state = task_checks.get(title_t, {"v": True})
 
         def _toggle(_, title=title_t, s=state, ref=check_ref):
@@ -192,6 +202,9 @@ def _render_plan_card(plan: dict, on_save_tasks, on_refine) -> ft.Container:
             except Exception:
                 pass
 
+        def _do_save_one(_, task_data=td, ref=save_btn_ref):
+            _save_one_task(task_data, btn_ref=ref)
+
         return ft.Container(
             content=ft.Row([
                 ft.GestureDetector(
@@ -207,16 +220,15 @@ def _render_plan_card(plan: dict, on_save_tasks, on_refine) -> ft.Container:
                 ),
                 ft.Column([
                     ft.Text(title_t, size=Typography.TINY, color=Colors.TEXT_PRIMARY,
-                            max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, expand=True),
+                            expand=True),
                     ft.Text(f"{est} {t('minutes_short')}", size=8, color=Colors.TEXT_MUTED),
                 ], spacing=0, tight=True, expand=True),
-                ft.Container(
-                    width=5, height=5, border_radius=3, bgcolor=pri_color,
-                ),
-                # Per-task save button
+                ft.Container(width=5, height=5, border_radius=3, bgcolor=pri_color),
+                # Per-task save button với ref để update tại chỗ
                 ft.GestureDetector(
-                    on_tap=lambda _, task_data=td: _save_one_task(task_data),
+                    on_tap=_do_save_one,
                     content=ft.Container(
+                        ref=save_btn_ref,
                         content=ft.Text(t("save_btn_short"), size=8, color=Colors.PRIMARY,
                                         weight=Typography.BOLD),
                         padding=ft.padding.symmetric(horizontal=7, vertical=3),
@@ -263,6 +275,7 @@ def _render_plan_card(plan: dict, on_save_tasks, on_refine) -> ft.Container:
             pass
         # Replace task list with success UI in-place
         _current_plan_data[0] = None
+        _current_plan_data[1] = None  # release session binding after save-all
         if tasks_content_ref.current:
             tasks_content_ref.current.controls = [
                 ft.Container(
@@ -398,17 +411,17 @@ def _render_plan_card(plan: dict, on_save_tasks, on_refine) -> ft.Container:
         border=ft.Border.all(1, Colors.PRIMARY_BORDER),
         shadow=ft.BoxShadow(blur_radius=10, color=Colors.PRIMARY_SHADOW,
                             offset=ft.Offset(0, 2)),
-        width=290,
     )
 
 
 # ── Main screen builder ───────────────────────────────────────────────────────
 
-_current_page     = [None]   # module-level refs for save task callbacks
-_current_user_id  = [""]
-_current_navigate = [None]
-_current_plan_data = [None]  # persists last plan across navigation
-_pending_prompt   = [None]   # auto-send on next screen load (set from other screens)
+_current_page           = [None]   # module-level refs for save task callbacks
+_current_user_id        = [""]
+_current_navigate       = [None]
+_current_plan_data      = [None, None]  # [plan_result, session_id] — per-session
+_pending_prompt         = [None]        # auto-send on next screen load
+_current_priority_shown = [False, None] # [shown, session_id] — per-session
 
 
 def set_pending_prompt(text: str):
@@ -520,14 +533,140 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
                         pass
         threading.Thread(target=_run, daemon=True).start()
 
+    # ── Markdown renderer (AI bubble only) ────────────────────
+    def _render_md(text: str) -> ft.Column:
+        """Convert markdown-like AI text to rich Flet controls."""
+        import re as _re
+
+        TC = Colors.TEXT_PRIMARY
+        TP = Colors.PRIMARY
+        TE = Colors.ERROR
+        TW = Colors.WARNING
+        TS = Colors.SUCCESS
+
+        BODY = Typography.BODY
+        SEMI = Typography.SEMIBOLD
+        BOLD = Typography.BOLD
+
+        # emoji → color mapping for leading status emoji
+        EMOJI_COLOR = {
+            "🔴": TE, "⚠️": TE, "❌": TE,
+            "🟡": TW, "⏰": TW, "💡": TW,
+            "🟢": TS, "✅": TS, "🎉": TS,
+            "⚡": TP, "📊": TP, "📋": TP, "🎯": TP,
+        }
+
+        def _spans(raw: str) -> list:
+            """Split **bold** into TextSpan list for ft.Text(spans=...)."""
+            parts = _re.split(r'\*\*(.+?)\*\*', raw)
+            result = []
+            for i, p in enumerate(parts):
+                if p:
+                    result.append(ft.TextSpan(
+                        p,
+                        style=ft.TextStyle(
+                            weight=BOLD if i % 2 == 1 else None,
+                            color=TC, size=BODY,
+                        ),
+                    ))
+            return result or [ft.TextSpan(raw, style=ft.TextStyle(color=TC, size=BODY))]
+
+        def _line_ctrl(raw: str):
+            s = raw.strip()
+            if not s:
+                return ft.Container(height=4)
+
+            # ## Section header
+            if s.startswith('## '):
+                return ft.Container(
+                    content=ft.Text(s[3:], size=Typography.SMALL, color=TC,
+                                    weight=BOLD, selectable=True),
+                    padding=ft.padding.only(top=8, bottom=2),
+                )
+
+            # → Action line  (e.g. "**→ Gợi ý:**" or "→ Hành động")
+            m = _re.match(r'^(?:\*\*)?→\s*(?:\*\*)?\s*(.*)', s)
+            if m:
+                body = _re.sub(r'\*\*', '', m.group(1)).strip()
+                return ft.Container(
+                    content=ft.Row([
+                        ft.Container(
+                            content=ft.Text("→", size=BODY, color=TP, weight=BOLD),
+                            width=18,
+                        ),
+                        ft.Text(body, size=BODY, color=TP, weight=SEMI,
+                                expand=True, selectable=True),
+                    ], spacing=4, vertical_alignment=ft.CrossAxisAlignment.START),
+                    padding=ft.padding.only(top=3),
+                )
+
+            # • Bullet  (•, -, *)
+            bm = _re.match(r'^[•\-\*]\s+(.*)', s)
+            if bm:
+                body = bm.group(1)
+                if '**' in body:
+                    content_ctrl = ft.Text(
+                        spans=_spans(body), selectable=True,
+                        expand=True,
+                    )
+                else:
+                    content_ctrl = ft.Text(body, size=BODY, color=TC,
+                                           selectable=True, expand=True)
+                return ft.Container(
+                    content=ft.Row([
+                        ft.Container(
+                            width=5, height=5, border_radius=3, bgcolor=TP,
+                            margin=ft.margin.only(top=6),
+                        ),
+                        content_ctrl,
+                    ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.START),
+                    padding=ft.padding.only(left=4, top=2, bottom=2),
+                )
+
+            # Regular line — parse inline **bold**
+            if '**' in s:
+                return ft.Text(spans=_spans(s), selectable=True)
+
+            # Plain text — detect leading emoji for color tinting
+            first_emoji = s[:2].strip()
+            accent = EMOJI_COLOR.get(first_emoji)
+            return ft.Text(
+                s, size=BODY,
+                color=accent if accent else TC,
+                selectable=True,
+            )
+
+        lines = text.split('\n')
+        controls: list = []
+        prev_spacer = False
+        for raw in lines:
+            ctrl = _line_ctrl(raw)
+            is_spacer = (isinstance(ctrl, ft.Container)
+                         and getattr(ctrl, 'height', None) in (3, 4, 6))
+            if is_spacer and prev_spacer:
+                continue         # collapse consecutive blank lines
+            controls.append(ctrl)
+            prev_spacer = is_spacer
+
+        return ft.Column(
+            controls or [ft.Text(text, size=BODY, color=TC, selectable=True)],
+            spacing=1, tight=True,
+        )
+
     # ── Bubble helper ──────────────────────────────────────────
     def _bubble(text: str, is_user: bool = False, animate: bool = True) -> ft.Row:
-        content = ft.Text(
-            text,
-            size=Typography.BODY,
-            color="white" if is_user else Colors.TEXT_PRIMARY,
-            selectable=True,
-        )
+        # User bubble: plain white text (short, no markdown)
+        # AI bubble: rich markdown renderer
+        if is_user:
+            content = ft.Text(
+                text,
+                size=Typography.BODY,
+                color="white",
+                selectable=True,
+            )
+        else:
+            content = _render_md(text)
+
         bubble = ft.Container(
             content=content,
             padding=ft.Padding.symmetric(horizontal=14, vertical=10),
@@ -1274,6 +1413,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
                 if result.get("type") == "plan_result":
                     _state["last_plan"] = result
                     _current_plan_data[0] = result
+                    _current_plan_data[1] = _state["session_id"]  # bind to session
                     row = _plan_row(result)
                     _add_to_chat(row)
                     summary = f"[Kế hoạch] {result.get('title', '')}\n{result.get('summary', '')}"
@@ -1589,11 +1729,209 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
                             offset=ft.Offset(0, 3)),
     )
 
+    # ── Priority task card (real DB tasks, clickable) ─────────
+    def _render_priority_card() -> ft.Row:
+        """Fetch active tasks, sort by urgency/priority, render as clickable cards."""
+        try:
+            all_t = TaskService.get_tasks(user.id)
+        except Exception:
+            all_t = []
+
+        active = [tk for tk in all_t if tk.status not in ("done", "cancelled")]
+        pri_order = {"high": 0, "medium": 1, "low": 2}
+        sorted_t = sorted(active, key=lambda tk: (
+            0 if tk.is_overdue else 1,
+            -getattr(tk, "ai_priority_score", 50),
+            pri_order.get(tk.priority, 1),
+            tk.due_date or "9999",
+        ))[:7]
+
+        ai_avatar = ft.Container(
+            content=ft.Image(src="avtdoumar.png", fit="cover"),
+            width=30, height=30, border_radius=15,
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        )
+
+        pri_color_map = {"high": Colors.ERROR, "medium": Colors.WARNING, "low": Colors.SUCCESS}
+
+        def _task_row(tk, rank: int) -> ft.GestureDetector:
+            pri_c  = pri_color_map.get(tk.priority, Colors.TEXT_MUTED)
+            overdue = tk.is_overdue
+            days   = tk.days_until_due
+
+            if days is None:
+                date_txt, date_c = "Chưa đặt deadline", Colors.TEXT_MUTED
+            elif days < 0:
+                date_txt, date_c = f"Quá hạn {abs(days)}n", Colors.ERROR
+            elif days == 0:
+                date_txt, date_c = "Hạn hôm nay", Colors.WARNING
+            elif days == 1:
+                date_txt, date_c = "Hạn ngày mai", Colors.WARNING
+            else:
+                date_txt, date_c = f"Còn {days} ngày", Colors.TEXT_MUTED
+
+            est = getattr(tk, "estimated_minutes", 30)
+            cat_info = {"work": "💼", "personal": "👤", "health": "💪",
+                        "finance": "💰", "education": "📚"}.get(tk.category, "📌")
+
+            return ft.GestureDetector(
+                on_tap=lambda _, task=tk: on_navigate("task_edit", task=task),
+                content=ft.Container(
+                    content=ft.Row([
+                        # Rank badge
+                        ft.Container(
+                            content=ft.Text(
+                                str(rank), size=8, color="white",
+                                weight=Typography.BOLD,
+                                text_align=ft.TextAlign.CENTER,
+                            ),
+                            width=20, height=20, border_radius=10,
+                            bgcolor=Colors.ERROR if overdue else Colors.PRIMARY,
+                            alignment=ft.Alignment.CENTER,
+                        ),
+                        # Info
+                        ft.Column([
+                            ft.Text(
+                                tk.title, size=Typography.SMALL,
+                                color=Colors.TEXT_PRIMARY, weight=Typography.SEMIBOLD,
+                                max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                            ft.Row([
+                                ft.Text(cat_info, size=10),
+                                ft.Text(date_txt, size=Typography.TINY,
+                                        color=date_c,
+                                        weight=Typography.SEMIBOLD if days is not None and days <= 0
+                                               else Typography.REGULAR),
+                                ft.Text("·", size=Typography.TINY, color=Colors.TEXT_MUTED),
+                                ft.Container(width=6, height=6, border_radius=3, bgcolor=pri_c),
+                                ft.Text(f"{est}p", size=Typography.TINY, color=Colors.TEXT_MUTED),
+                            ], spacing=4, tight=True,
+                               vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                        ], spacing=2, tight=True, expand=True),
+                        ft.Icon(ft.Icons.CHEVRON_RIGHT_ROUNDED, size=15, color=Colors.TEXT_MUTED),
+                    ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    padding=ft.padding.symmetric(vertical=8, horizontal=10),
+                    border_radius=Radius.MD,
+                    bgcolor=f"#12{Colors.ERROR[1:]}" if overdue else Colors.BG_SURFACE,
+                    border=ft.Border.all(
+                        1, f"#35{Colors.ERROR[1:]}" if overdue else Colors.BORDER),
+                    margin=ft.margin.only(bottom=4),
+                    ink=True,
+                    animate=ft.Animation(150, ft.AnimationCurve.EASE_OUT),
+                ),
+            )
+
+        if not sorted_t:
+            card_content = ft.Container(
+                content=ft.Text("🎉 Không có task nào — rảnh thôi!",
+                                size=Typography.BODY, color=Colors.SUCCESS),
+                padding=ft.padding.all(14),
+            )
+        else:
+            rows = [_task_row(tk, i + 1) for i, tk in enumerate(sorted_t)]
+            see_all_btn = ft.Container(
+                content=ft.Row([
+                    ft.Icon(ft.Icons.CHECKLIST_ROUNDED, size=13, color=Colors.PRIMARY),
+                    ft.Text("Xem tất cả task", size=Typography.TINY,
+                            color=Colors.PRIMARY, weight=Typography.SEMIBOLD),
+                ], spacing=6, alignment=ft.MainAxisAlignment.CENTER),
+                height=34, border_radius=Radius.MD,
+                bgcolor=Colors.PRIMARY_BG,
+                border=ft.Border.all(1, Colors.PRIMARY_BORDER),
+                alignment=ft.Alignment.CENTER,
+                on_click=lambda _: on_navigate("tasks"), ink=True,
+                margin=ft.margin.only(top=4),
+            )
+            card_content = ft.Column(
+                [
+                    ft.Row([
+                        ft.Icon(ft.Icons.AUTO_AWESOME_ROUNDED, size=13, color=Colors.PRIMARY),
+                        ft.Text("Task ưu tiên cao nhất", size=Typography.SMALL,
+                                color=Colors.TEXT_PRIMARY, weight=Typography.BOLD,
+                                expand=True),
+                        ft.Text(f"{len(sorted_t)} task", size=Typography.TINY,
+                                color=Colors.TEXT_MUTED),
+                    ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    ft.Container(height=8),
+                    *rows,
+                    see_all_btn,
+                ],
+                spacing=0, tight=True,
+            )
+
+        card = ft.Container(
+            content=card_content,
+            padding=ft.padding.all(12),
+            border_radius=ft.BorderRadius(4, 16, 16, 16),
+            bgcolor=Colors.BG_CARD,
+            border=ft.Border.all(1, Colors.PRIMARY_BORDER),
+            shadow=ft.BoxShadow(blur_radius=10, color=Colors.PRIMARY_SHADOW,
+                                offset=ft.Offset(0, 2)),
+        )
+
+        return ft.Row(
+            [ai_avatar,
+             ft.Column([card], expand=True,
+                       horizontal_alignment=ft.CrossAxisAlignment.START)],
+            spacing=Spacing.SM, vertical_alignment=ft.CrossAxisAlignment.START,
+        )
+
+    def _run_priority_reply(prompt: str):
+        """Show real priority task card + brief AI note."""
+        _typing.visible = True
+        try: page.update()
+        except Exception: pass
+        _scroll_down()
+
+        def _worker():
+            try:
+                # 1. Show real task card + bind to current session
+                card_row = _render_priority_card()
+                _current_priority_shown[0] = True
+                _current_priority_shown[1] = _state["session_id"]
+                _add_to_chat(card_row)
+
+                # 2. Get a short AI recommendation
+                from utils.ai_helper import get_ai_reply
+                lang_instr = ai_lang_instruction()
+                brief = (
+                    f"{lang_instr}\n"
+                    "Dựa vào danh sách task vừa hiển thị, hãy đưa ra lời khuyên ngắn "
+                    "(2-3 câu) về thứ tự ưu tiên và lý do."
+                ).strip()
+                reply = get_ai_reply(user.settings, brief, user.id, _state["session_id"])
+                _add_to_chat(_bubble(reply, is_user=False))
+                if _state["session_id"]:
+                    ChatService.add_message(user.id, _state["session_id"], "model", reply)
+            except Exception as _exc:
+                logger.exception("_run_priority_reply failed")
+                _add_to_chat(_bubble(f"❌ Lỗi: {str(_exc)[:80]}", is_user=False))
+            finally:
+                _typing.visible = False
+                _load_sessions_ui()
+                try: page.update()
+                except Exception: pass
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     # ── Quick prompt chips ─────────────────────────────────────
-    def _chip(emoji: str, label: str, prompt: str):
+    def _chip(emoji: str, label: str, prompt: str, reply_fn=None):
         def _tap(_):
-            tf.value = prompt
-            _send(None)
+            _add_to_chat(_bubble(prompt, is_user=True))
+            if _state["session_id"]:
+                ChatService.add_message(user.id, _state["session_id"], "user", prompt)
+            try:
+                from core.services import BehaviorService as _BS
+                _BS.log(user.id, "chat_sent", {"length": len(prompt), "via": "chip"})
+            except Exception:
+                pass
+            _load_sessions_ui()
+            try: page.update()
+            except Exception: pass
+            if reply_fn:
+                reply_fn(prompt)
+            else:
+                _run_plan_reply(prompt, last_plan=None)
         return ft.GestureDetector(
             content=ft.Container(
                 content=ft.Row([
@@ -1609,7 +1947,11 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         )
 
     chips_row = ft.Row(
-        [_chip(e, l, p) for e, l, p in _get_quick_prompts()],
+        [
+            _chip(e, l, p,
+                  reply_fn=_run_priority_reply if i == 2 else None)
+            for i, (e, l, p) in enumerate(_get_quick_prompts())
+        ],
         scroll=ft.ScrollMode.AUTO, spacing=Spacing.SM,
     )
 
@@ -1629,7 +1971,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
     def _start_new_chat(_):
         _state["session_id"] = ChatService.create_session(user.id, "Chat mới")
         _state["last_plan"] = None
-        _load_active_session()
+        _load_active_session()  # session_id mismatch sẽ tự hide card cũ
         if _history_state["open"]:
             toggle_history(None)
 
@@ -1776,7 +2118,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
     def _switch_session(sid):
         _state["session_id"] = sid
         _state["last_plan"] = None
-        _load_active_session()
+        _load_active_session()  # session_id check tự lọc card đúng session
         if _history_state["open"]:
             toggle_history(None)
 
@@ -1792,6 +2134,8 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         ChatService.clear_all(user.id)
         _state["session_id"] = None
         _state["last_plan"] = None
+        _current_plan_data[0] = None;     _current_plan_data[1] = None
+        _current_priority_shown[0] = False; _current_priority_shown[1] = None
         _load_active_session()
 
     def _load_active_session():
@@ -1810,15 +2154,49 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
         history = session.get("messages", [])
         if not history:
             name = user.full_name or user.username
-            welcome_text = (
-                f"Xin chào {name}! 👋\n\n"
-                f"Tôi là **Doumar** — trợ lý AI lập kế hoạch của bạn.\n"
-                f"Hiện bạn có {total} công việc · ✅ {done} xong ({pct}%) · 📋 {pending} chờ\n\n"
-                f"Thử nhập:\n"
-                f'• "Lên kế hoạch làm đồ án OpenGL trong 5 ngày"\n'
-                f'• "Mai 8h nhắc tôi nộp báo cáo"\n'
-                f'• "Task nào cần làm trước?"'
-            )
+
+            # Top 3 công việc quan trọng nhất
+            pri_order = {"high": 0, "medium": 1, "low": 2}
+            active_tasks = [tk for tk in tasks if tk.status not in ("done", "cancelled")]
+            top3 = sorted(active_tasks, key=lambda tk: (
+                0 if tk.is_overdue else 1,
+                -getattr(tk, "ai_priority_score", 50),
+                pri_order.get(tk.priority, 1),
+                tk.due_date or "9999",
+            ))[:3]
+
+            if top3:
+                task_lines = []
+                for tk in top3:
+                    days = tk.days_until_due
+                    if days is None:
+                        suffix = ""
+                    elif days < 0:
+                        suffix = f" ⚠️ quá hạn {abs(days)}n"
+                    elif days == 0:
+                        suffix = " 🔔 hạn hôm nay"
+                    elif days == 1:
+                        suffix = " · hạn ngày mai"
+                    else:
+                        suffix = f" · còn {days} ngày"
+                    pri_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(tk.priority, "⚪")
+                    task_lines.append(f"• {pri_icon} **{tk.title}**{suffix}")
+                tasks_section = "\n".join(task_lines)
+                welcome_text = (
+                    f"Xin chào **{name}**! 👋\n\n"
+                    f"Tôi là **Doumar** — trợ lý AI lập kế hoạch của bạn.\n"
+                    f"Hiện bạn có {total} công việc · ✅ {done} xong ({pct}%) · 📋 {pending} chờ\n\n"
+                    f"Công việc cần làm:\n"
+                    f"{tasks_section}"
+                )
+            else:
+                welcome_text = (
+                    f"Xin chào **{name}**! 👋\n\n"
+                    f"Tôi là **Doumar** — trợ lý AI lập kế hoạch của bạn.\n"
+                    f"Hiện bạn có {total} công việc · ✅ {done} xong ({pct}%) · 📋 {pending} chờ\n\n"
+                    f"🎉 Tuyệt vời — không có công việc nào cần làm ngay!"
+                )
+
             chat_lv.controls.append(_bubble(welcome_text, is_user=False, animate=False))
             ChatService.add_message(user.id, _state["session_id"], "model", welcome_text)
         else:
@@ -1827,9 +2205,15 @@ def build_ai_screen(page: ft.Page, user, on_navigate):
                     _bubble(msg["text"], is_user=(msg["role"] == "user"), animate=False)
                 )
 
-        # Re-render last plan card if user navigated away and back
-        if _current_plan_data[0]:
+        # Re-render plan card only if it belongs to this session
+        if (_current_plan_data[0] and
+                _current_plan_data[1] == _state["session_id"]):
             chat_lv.controls.append(_plan_row(_current_plan_data[0]))
+
+        # Re-render priority card only if it belongs to this session
+        if (_current_priority_shown[0] and
+                _current_priority_shown[1] == _state["session_id"]):
+            chat_lv.controls.append(_render_priority_card())
 
         chat_lv.controls.append(_typing)
         _load_sessions_ui()
