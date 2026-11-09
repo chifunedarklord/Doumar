@@ -178,7 +178,7 @@ def status_chip(status: str) -> ft.Container:
 
 def user_avatar(size: int = 40) -> ft.Container:
     return ft.Container(
-        content=ft.Image(src="avtdoumar.png", fit="cover"),
+        content=ft.Image(src="ink-cat.png", fit="cover"),
         width=size, height=size,
         border_radius=size // 2,
         clip_behavior=ft.ClipBehavior.ANTI_ALIAS,

@@ -250,10 +250,10 @@ class SchedulingEngine:
                 f'[{{"title": "...", "estimated_minutes": 30}}, ...]'
             )
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-3.1-flash-lite",
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                    thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW),
                     max_output_tokens=500,
                 ),
             )

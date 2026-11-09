@@ -205,3 +205,25 @@ class ProductivityLog:
     def to_dict(self):
         return asdict(self)
 
+
+# ─── Project ──────────────────────────────────────────────────────────────────
+
+@dataclass
+class Project:
+    id: str
+    user_id: str = ""
+    name: str = ""
+    description: str = ""
+    color: str = "#7C3AED"
+    status: str = "active"
+    priority: str = "medium"
+    due_date: Optional[str] = None
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    def to_dict(self):
+        return asdict(self)
+
+    @staticmethod
+    def from_dict(d: dict) -> "Project":
+        return Project(**d)

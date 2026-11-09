@@ -114,18 +114,32 @@ class Storage:
             return [cls._orm_to_task(m) for m in models]
 
     @classmethod
-    def save_task(cls, task: Task) -> bool:
+    def save_task(cls, task: Task, expected_revision=None) -> bool:
         """Save task (upsert). Returns True if this was a new task, False if update."""
+        from core.workspace import validate_task
+        validate_task(task)
         task.updated_at = datetime.now().isoformat()
         with SessionLocal() as db:
+            if expected_revision is not None and db.bind.dialect.name == 'sqlite':
+                from sqlalchemy import text
+                db.execute(text('BEGIN IMMEDIATE'))
             m = db.query(TaskModel).filter(TaskModel.id == task.id).first()
+            if expected_revision is not None and (m is None or m.updated_at != expected_revision):
+                raise ValueError('Công việc đã thay đổi. Sao chép nội dung đang sửa rồi mở lại công việc để xem bản mới.')
+            if m is not None and m.user_id != task.user_id:
+                raise ValueError("Công việc không thuộc tài khoản hiện tại.")
             is_new = m is None
+            previous_title = m.title if m is not None else None
+            was_done = not is_new and m.status == "done"
             if is_new:
                 m = TaskModel(id=task.id)
                 db.add(m)
             
             m.user_id = task.user_id
             m.title = task.title
+            if previous_title is not None and previous_title != task.title:
+                from core.orm import ScheduleBlockModel
+                db.query(ScheduleBlockModel).filter_by(user_id=task.user_id, task_id=task.id).update({'title': task.title})
             m.description = task.description
             m.category = task.category
             m.priority = task.priority
@@ -159,6 +173,21 @@ class Storage:
             m.focus_score = getattr(task, "focus_score", 0.0)
             m.deadline_type = getattr(task, "deadline_type", "soft")
             m.project_id = getattr(task, "project_id", None)
+            if task.status == "done" and task.is_recurring and not was_done:
+                from core.task_rules import next_occurrence
+                from dataclasses import asdict
+                # One successor per occurrence, including after undo/re-complete
+                # on a later day. Retain lineage when a successor is trashed.
+                lineage_key = "next:" + task.id
+                lineage = db.query(AIMemoryModel).filter_by(user_id=task.user_id, memory_type="recurrence", key=lineage_key).first()
+                if lineage is None:
+                    following = next_occurrence(task)
+                    db.flush()
+                    if following and db.get(TaskModel, following.id) is None:
+                        db.add(TaskModel(**asdict(following)))
+                    if following:
+                        db.add(AIMemoryModel(user_id=task.user_id, memory_type="recurrence", key=lineage_key,
+                                             value=following.id, confidence=1.0, updated_at=datetime.now().isoformat()))
             db.commit()
         return is_new
 
@@ -376,3 +405,18 @@ class Storage:
             try: return json.loads(m.metric_value)
             except: return m.metric_value
 
+    @classmethod
+    def delete_memory(cls, user_id: str, memory_type: str, key: str):
+        with SessionLocal() as db:
+            db.query(AIMemoryModel).filter(
+                AIMemoryModel.user_id == user_id,
+                AIMemoryModel.memory_type == memory_type,
+                AIMemoryModel.key == key
+            ).delete()
+            db.commit()
+
+    @classmethod
+    def save_project(cls, project):
+        """Lưu project thông qua ProjectService (tương thích backward)."""
+        from core.services import ProjectService
+        ProjectService.save_project(project)

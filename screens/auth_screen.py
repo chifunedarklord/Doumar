@@ -1,264 +1,221 @@
-"""
-TaskFlow - Login / Register Screen (Redesign)
-Luxury dark theme - Clean & balanced
-"""
+"""Compact monochrome authentication with real browser-based social sign-in."""
+import asyncio
+import base64
+import re
+from pathlib import Path
+from urllib.parse import urlsplit
 import flet as ft
-from core.theme import Colors, Typography, Spacing, Radius
 from core.services import AuthService
-from core.i18n import t
+from core.cloud import CloudClient
 
-login    = AuthService.login
-register = AuthService.register
-from components.widgets import (
-    text_input, snack, primary_button
-)
+INK, MUTED, LINE = '#111111', '#666666', '#E5E5E5'
 
 
-def build_auth_screen(page: ft.Page, on_login_success):
+def build_auth_screen(page, on_login_success):
+    state = {'mode': 'login', 'busy': False, 'epoch': 0, 'ticket': None}
+    client = CloudClient()
+    launcher = ft.UrlLauncher()
+    page.services.append(launcher)
+    heading = ft.Text('Chào mừng trở lại', size=27, weight=ft.FontWeight.W_600, color=INK)
+    subtitle = ft.Text('Tiếp tục với lịch học và công việc của bạn.', size=16, color=MUTED)
+    message = ft.Text('', size=16, color=INK, selectable=True, visible=False)
+    footnote = ft.Text('Tài khoản chỉ lưu trên máy này.' if not client.configured else 'Đăng nhập mạng xã hội sẽ tạo tài khoản nếu bạn chưa có.',
+        size=14, color=MUTED, text_align=ft.TextAlign.CENTER)
 
-    page.bgcolor = Colors.BG_DARKEST
-    page.padding = 0
+    def field(label, icon, **kwargs):
+        return ft.TextField(label=label, prefix_icon=icon, text_size=17, dense=True,
+            border_color=LINE, focused_border_color=INK, border_radius=6,
+            content_padding=ft.Padding.symmetric(horizontal=12, vertical=12), **kwargs)
+    username = field('Tên đăng nhập', ft.Icons.PERSON_OUTLINE, autofocus=True, max_length=40, counter='')
+    email = field('Email', ft.Icons.MAIL_OUTLINE, max_length=254, counter='', visible=False)
+    password = field('Mật khẩu', ft.Icons.LOCK_OUTLINE, password=True, can_reveal_password=True)
+    confirm = field('Nhập lại mật khẩu', ft.Icons.LOCK_OUTLINE, password=True, can_reveal_password=True, visible=False)
+    token = field('Mã khôi phục trong email', ft.Icons.KEY_OUTLINED, visible=False)
+    fields = [username, email, password, confirm, token]
 
-    # ── STATE ─────────────────────────────
-    state = {"is_login": True}
+    def inform(value):
+        message.value, message.visible = value, bool(value)
 
-    # ── INPUTS ────────────────────────────
-    tf_username = text_input(t("username"), t("username_hint"),
-                            prefix_icon=ft.Icons.PERSON_OUTLINE)
-
-    tf_email = text_input(t("email"), t("email_hint"),
-                         prefix_icon=ft.Icons.EMAIL_OUTLINED)
-
-    tf_fullname = text_input(t("fullname_label"), t("fullname_hint"),
-                            prefix_icon=ft.Icons.BADGE_OUTLINED)
-
-    tf_password = text_input(t("password"), t("password_hint"),
-                            password=True,
-                            prefix_icon=ft.Icons.LOCK_OUTLINE)
-
-    tf_confirm = text_input(t("confirm_password"), t("confirm_password_hint"),
-                           password=True,
-                           prefix_icon=ft.Icons.LOCK_RESET_OUTLINED)
-
-    err_text = ft.Text("", color=Colors.ERROR,
-                       size=Typography.SMALL,
-                       text_align=ft.TextAlign.CENTER)
-
-    # ── REFS ──────────────────────────────
-    extra_ref = ft.Ref[ft.Column]()
-    confirm_ref = ft.Ref[ft.Container]()
-    title_ref = ft.Ref[ft.Text]()
-    sub_ref = ft.Ref[ft.Text]()
-    toggle_prompt_ref = ft.Ref[ft.Text]()
-    toggle_btn_text_ref = ft.Ref[ft.Text]()
-
-    # ── EVENTS ────────────────────────────
-    def clear_err(_=None):
-        err_text.value = ""
+    def busy(value):
+        state['busy'] = value
+        for control in [*fields, *social_buttons, login_tab, register_tab, submit, forgot, have_code, back]:
+            control.disabled = value
         page.update()
 
-    tf_username.on_change = clear_err
-    tf_password.on_change = clear_err
+    def mode(value):
+        if state['busy']:
+            return
+        state['mode'] = value
+        regular = value in ('login', 'register')
+        footnote.visible = regular
+        tabs.visible = social.visible = divider.visible = regular
+        username.visible = regular
+        email.visible = value in ('register', 'forgot')
+        password.visible = value != 'forgot'
+        confirm.visible = value in ('register', 'reset')
+        token.visible = value == 'reset'
+        password.value = confirm.value = token.value = ''
+        heading.value = {'login': 'Chào mừng trở lại', 'register': 'Tạo tài khoản TaskFlow',
+                         'forgot': 'Quên mật khẩu?', 'reset': 'Đặt lại mật khẩu'}[value]
+        subtitle.value = {'login': 'Tiếp tục với lịch học và công việc của bạn.',
+            'register': 'Một nơi gọn gàng cho kế hoạch mỗi ngày.',
+            'forgot': 'Nhận mã khôi phục qua email của bạn.', 'reset': 'Nhập mã trong email và chọn mật khẩu mới.'}[value]
+        submit.content = {'login': 'Đăng nhập', 'register': 'Tạo tài khoản', 'forgot': 'Gửi mã khôi phục', 'reset': 'Lưu mật khẩu mới'}[value]
+        forgot.visible = value == 'login' and client.configured
+        forgot_row.visible = forgot.visible
+        have_code.visible = value == 'forgot'
+        back.visible = not regular
+        password.label = ('Mật khẩu · tối thiểu 10 ký tự' if client.configured else 'Mật khẩu · tối thiểu 6 ký tự') if value in ('register', 'reset') else 'Mật khẩu'
+        for button, selected in ((login_tab, value == 'login'), (register_tab, value == 'register')):
+            button.style = ft.ButtonStyle(bgcolor='#F1F1F1' if selected else '#FFFFFF', color=INK if selected else MUTED,
+                shape=ft.RoundedRectangleBorder(radius=5), padding=8)
+        inform('')
+        page.update()
 
-    def handle_submit(_=None):
-        err_text.value = ""
-
-        uname = tf_username.value.strip()
-        pwd = tf_password.value.strip()
-
-        if state["is_login"]:
-            if not uname or not pwd:
-                err_text.value = t("fill_all")
-                page.update()
-                return
-
-            ok, msg, user = login(uname, pwd)
-
-            if ok:
-                snack(page, msg, success=True)
+    async def handle(_=None):
+        if state['busy']:
+            return
+        busy(True)
+        inform('Đang xử lý…')
+        page.update()
+        try:
+            current = state['mode']
+            if current in ('register', 'reset') and password.value != confirm.value:
+                raise ValueError('Mật khẩu nhập lại chưa khớp.')
+            if current == 'login':
+                if not (username.value or '').strip() or not password.value:
+                    raise ValueError('Nhập tên đăng nhập và mật khẩu để tiếp tục.')
+                ok, text, user = await asyncio.to_thread(AuthService.login, username.value.strip(), password.value)
+                if not ok:
+                    raise ValueError(text)
                 on_login_success(user)
+            elif current == 'register':
+                if not (username.value or '').strip() or not (email.value or '').strip() or not password.value:
+                    raise ValueError('Nhập tên đăng nhập, email và mật khẩu để tạo tài khoản.')
+                if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email.value.strip()):
+                    raise ValueError('Nhập địa chỉ email hợp lệ, ví dụ ban@example.com.')
+                ok, text = await asyncio.to_thread(AuthService.register, username.value.strip(), email.value.strip(), password.value, '')
+                if not ok:
+                    raise ValueError(text)
+                busy(False)
+                mode('login')
+                inform('Đã tạo tài khoản. Đăng nhập để bắt đầu.')
             else:
-                err_text.value = msg
-                page.update()
+                data = {'email': (email.value or '').strip()} if current == 'forgot' else {'token': (token.value or '').strip(), 'password': password.value or ''}
+                endpoint = '/v1/auth/forgot-password' if current == 'forgot' else '/v1/auth/reset-password'
+                result = await asyncio.to_thread(client.request, 'POST', endpoint, data, False)
+                inform(result['message'])
+        except ValueError as exc:
+            inform(str(exc))
+        except Exception:
+            inform('Chưa thực hiện được. Nội dung vẫn được giữ; hãy thử lại.')
+        finally:
+            busy(False)
 
-        else:
-            email = tf_email.value.strip()
-            fname = tf_fullname.value.strip()
-            confirm = tf_confirm.value.strip()
+    async def cancel_social(_=None):
+        if cancel.disabled:
+            return
+        state['epoch'] += 1
+        ticket = state['ticket']
+        state['ticket'] = None
+        cancel.visible = False
+        inform('Đã hủy. Bạn có thể chọn cách đăng nhập khác.')
+        busy(False)
+        if ticket:
+            try:
+                await asyncio.to_thread(client.request, 'POST', '/v1/auth/social/cancel', {'ticket': ticket}, False)
+            except ValueError:
+                pass
 
-            if not uname or not email or not pwd:
-                err_text.value = t("fill_all")
-                page.update()
-                return
-
-            if pwd != confirm:
-                err_text.value = t("password_mismatch")
-                page.update()
-                return
-
-            ok, msg = register(uname, email, pwd, fname)
-
-            if ok:
-                snack(page, t("register_success"), success=True)
-                switch_mode(None)
-            else:
-                err_text.value = msg
-                page.update()
-
-    def switch_mode(_):
-        state["is_login"] = not state["is_login"]
-        mode = state["is_login"]
-
-        extra_ref.current.visible = not mode
-        confirm_ref.current.visible = not mode
-
-        title_ref.current.value = t("welcome_back") if mode else t("create_account_title")
-        sub_ref.current.value = t("login_subtitle") if mode else t("new_account_subtitle")
-
-        toggle_prompt_ref.current.value = t("no_account") if mode else t("have_account")
-        toggle_btn_text_ref.current.value = t("register") if mode else t("login")
-
-        # Clear all fields when switching modes
-        tf_username.value = ""
-        tf_password.value = ""
-        tf_email.value = ""
-        tf_fullname.value = ""
-        tf_confirm.value = ""
-        err_text.value = ""
+    async def social_login(provider):
+        if state['busy']:
+            return
+        state['epoch'] += 1
+        attempt = state['epoch']
+        name = 'Google' if provider == 'google' else 'Facebook'
+        busy(True)
+        cancel.disabled = False
+        cancel.visible = True
+        inform('Đang mở ' + name + '…')
         page.update()
+        ticket = None
+        try:
+            result = await asyncio.to_thread(client.request, 'POST', '/v1/auth/social/start', {'provider': provider}, False)
+            ticket = result['ticket']
+            if attempt != state['epoch']:
+                await asyncio.to_thread(client.request, 'POST', '/v1/auth/social/cancel', {'ticket': ticket}, False)
+                return
+            state['ticket'] = ticket
+            url = result['authorization_url']
+            parts = urlsplit(url)
+            expected = 'accounts.google.com' if provider == 'google' else 'www.facebook.com'
+            if parts.scheme != 'https' or parts.hostname != expected or parts.username or parts.password or parts.port not in (None, 443):
+                raise ValueError('Địa chỉ đăng nhập không hợp lệ. Hãy thử lại.')
+            await launcher.launch_url(url)
+            inform('Hoàn tất đăng nhập ' + name + ' trên trình duyệt. TaskFlow đang chờ bạn quay lại…')
+            page.update()
+            deadline = asyncio.get_running_loop().time() + min(600, int(result.get('expires_in', 600)))
+            while attempt == state['epoch'] and asyncio.get_running_loop().time() < deadline:
+                status = await asyncio.to_thread(client.request, 'POST', '/v1/auth/social/status', {'ticket': ticket}, False)
+                if attempt != state['epoch']:
+                    return
+                if status.get('status') == 'ready':
+                    cancel.disabled = True
+                    inform('Đang hoàn tất đăng nhập…')
+                    page.update()
+                    response = await asyncio.to_thread(client.request, 'POST', '/v1/auth/social/finish', {'ticket': ticket}, False)
+                    if response.get('account', {}).get('id') != status.get('account', {}).get('id'):
+                        raise ValueError('Tài khoản xác thực không khớp. Hãy thử lại.')
+                    user = await asyncio.to_thread(AuthService.finish_social_login, response)
+                    inform('Đã đăng nhập.')
+                    on_login_success(user)
+                    return
+                await asyncio.sleep(2)
+            if attempt == state['epoch']:
+                raise ValueError('Đã hết thời gian chờ. Chọn ' + name + ' để đăng nhập lại.')
+        except ValueError as exc:
+            if attempt == state['epoch']:
+                inform(str(exc))
+        except Exception:
+            if attempt == state['epoch']:
+                inform('Chưa đăng nhập được bằng ' + name + '. Hãy thử lại hoặc dùng tài khoản TaskFlow.')
+        finally:
+            if attempt == state['epoch']:
+                state['ticket'] = None
+                cancel.visible = False
+                cancel.disabled = False
+                busy(False)
 
-    # ── HEADER ────────────────────────────
-    header = ft.Column([
-    ft.Image(
-        src="doumar1.png",
-        width=320,
-        height=120,
-        fit="contain"
-    ),
-
-    ft.Text("Smart Task Manager",
-            size=12,
-            color=Colors.TEXT_MUTED)
-    ],
-    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-    spacing=6)
-
-    # ── TITLE ─────────────────────────────
-    title_section = ft.Column([
-        ft.Text(t("welcome_back"),
-                ref=title_ref,
-                size=22,
-                weight=Typography.BOLD,
-                color=Colors.TEXT_PRIMARY),
-
-        ft.Text(t("login_subtitle"),
-                ref=sub_ref,
-                size=13,
-                color=Colors.TEXT_MUTED)
-    ], spacing=4)
-
-    # ── FORM ──────────────────────────────
-    extra_fields = ft.Column([
-        tf_fullname,
-        tf_email
-    ], spacing=12, visible=False, ref=extra_ref)
-
-    confirm_field = ft.Container(
-        content=tf_confirm,
-        visible=False,
-        ref=confirm_ref
-    )
-
-    form = ft.Column([
-        tf_username,
-        extra_fields,
-        tf_password,
-        confirm_field,
-        err_text
-    ], spacing=12)
-
-    # ── BUTTON ────────────────────────────
-    submit_btn = primary_button(
-        t("confirm_btn"),
-        on_click=handle_submit,
-        width=200,
-        height=48
-    )
-
-    # ── TOGGLE ────────────────────────────
-    toggle = ft.Row([
-        ft.Text(t("no_account"),
-                ref=toggle_prompt_ref,
-                size=12,
-                color=Colors.TEXT_MUTED),
-
-        ft.TextButton(
-                      content=ft.Text(t("register"),
-                                      ref=toggle_btn_text_ref,
-                                      size=12,
-                                      color=Colors.PRIMARY),
-                      on_click=switch_mode)
-    ], alignment=ft.MainAxisAlignment.CENTER)
-
-    # ── CARD ──────────────────────────────
-    card = ft.Container(
-        content=ft.Column([
-            header,
-            ft.Divider(height=20, color="transparent"),
-            title_section,
-            ft.Divider(height=10, color="transparent"),
-            form,
-            ft.Divider(height=10, color="transparent"),
-            ft.Container(submit_btn, alignment=ft.Alignment.CENTER),
-            toggle
-        ], spacing=8),
-
-        width=360,
-        padding=24,
-        border_radius=16,
-        bgcolor=Colors.BG_CARD,
-        border=ft.Border.all(1, Colors.BORDER),
-        shadow=ft.BoxShadow(
-            blur_radius=30,
-            color="#10000000",
-            offset=ft.Offset(0, 6)
-        )
-    )
-
-    # ── BACKGROUND ────────────────────────
-    bg = ft.Stack([
-        ft.Container(bgcolor=Colors.BG_DARKEST, expand=True),
-
-        ft.Container(
-            width=260,
-            height=260,
-            border_radius=200,
-            gradient=ft.RadialGradient(
-                colors=["#222563EB", "transparent"]
-            ),
-            left=-80,
-            top=-80
-        ),
-
-        ft.Container(
-            width=220,
-            height=220,
-            border_radius=200,
-            gradient=ft.RadialGradient(
-                colors=["#228B5CF6", "transparent"]
-            ),
-            right=-60,
-            bottom=80
-        ),
-
-        ft.Container(
-            content=ft.Column([
-                ft.Container(expand=True),
-                card,
-                ft.Container(expand=True)
-            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-            expand=True
-        )
-    ])
-
-    return ft.Container(content=bg, expand=True)
+    google_image = base64.b64encode((Path(__file__).resolve().parents[1] / 'assets/google_g.png').read_bytes()).decode()
+    def provider_button(label, icon, provider):
+        return ft.OutlinedButton(content=ft.Row([icon, ft.Text(label, size=16, color=INK)], alignment=ft.MainAxisAlignment.CENTER, spacing=10),
+            height=46, style=ft.ButtonStyle(side=ft.BorderSide(1, LINE), bgcolor='#FFFFFF',
+                shape=ft.RoundedRectangleBorder(radius=6), padding=12),
+            on_click=lambda e: page.run_task(social_login, provider))
+    social_buttons = [provider_button('Tiếp tục với Google', ft.Image(src=google_image, width=19, height=19, fit=ft.BoxFit.CONTAIN, color=INK), 'google'),
+                      provider_button('Tiếp tục với Facebook', ft.Icon(ft.Icons.FACEBOOK, size=22, color=INK), 'facebook')]
+    social = ft.Column(social_buttons, spacing=8, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+    divider = ft.Row([ft.Container(height=1, bgcolor=LINE, expand=True), ft.Text('hoặc dùng tài khoản', size=14, color=MUTED),
+                      ft.Container(height=1, bgcolor=LINE, expand=True)], spacing=12)
+    login_tab = ft.TextButton('Đăng nhập', expand=True, on_click=lambda e: mode('login'))
+    register_tab = ft.TextButton('Tạo tài khoản', expand=True, on_click=lambda e: mode('register'))
+    tabs = ft.Row([login_tab, register_tab], spacing=4)
+    submit = ft.FilledButton('Đăng nhập', height=44, style=ft.ButtonStyle(
+        bgcolor={ft.ControlState.DEFAULT: INK, ft.ControlState.HOVERED: '#333333', ft.ControlState.DISABLED: '#777777'},
+        color='#FFFFFF', elevation=0, shape=ft.RoundedRectangleBorder(radius=6)), on_click=handle)
+    forgot = ft.TextButton('Quên mật khẩu?', visible=client.configured, on_click=lambda e: mode('forgot'))
+    have_code = ft.TextButton('Tôi đã có mã khôi phục', visible=False, on_click=lambda e: mode('reset'))
+    back = ft.TextButton('Quay lại đăng nhập', icon=ft.Icons.ARROW_BACK, visible=False, on_click=lambda e: mode('login'))
+    cancel = ft.TextButton('Hủy đăng nhập bằng trình duyệt', visible=False, on_click=cancel_social)
+    forgot_row = ft.Row([forgot], alignment=ft.MainAxisAlignment.END, visible=client.configured)
+    password.on_submit = confirm.on_submit = handle
+    login_tab.style = ft.ButtonStyle(bgcolor='#F1F1F1', color=INK, shape=ft.RoundedRectangleBorder(radius=5), padding=8)
+    register_tab.style = ft.ButtonStyle(color=MUTED, padding=8)
+    return ft.Column([
+        ft.Row([ft.Icon(ft.Icons.CHECK_BOX_OUTLINED, size=23, color=INK), ft.Text('TaskFlow', size=17, weight=ft.FontWeight.W_600, color=INK)], spacing=8),
+        ft.Column([heading, subtitle], spacing=6), tabs,
+        social, divider, ft.Column(fields, spacing=10, horizontal_alignment=ft.CrossAxisAlignment.STRETCH),
+        forgot_row,
+        message, submit, cancel, have_code, back,
+        footnote,
+    ], spacing=12, tight=True, scroll=ft.ScrollMode.AUTO, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)

@@ -6,7 +6,11 @@ import os
 import logging
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, Integer, Float, Boolean, Text, ForeignKey, create_engine, JSON, Unicode, UnicodeText
+from sqlalchemy import (
+    String, Integer, Float, Boolean, Text, ForeignKey, create_engine,
+    JSON, Unicode, UnicodeText, event
+)
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 logger = logging.getLogger(__name__)
@@ -18,6 +22,14 @@ except ImportError:
     pass
 
 
+def _get_sqlite_path() -> str:
+    """Trả về đường dẫn file SQLite db nằm trong thư mục data/ của dự án."""
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(base_dir, "data")
+    os.makedirs(data_dir, exist_ok=True)
+    return os.path.join(data_dir, "taskflow.db")
+
+
 def _build_mssql_odbc_connect() -> str:
     """Trả về chuỗi odbc_connect cho SQL Server. Raise nếu chưa cấu hình."""
     server   = os.environ.get("DB_SERVER", "").strip()
@@ -27,9 +39,8 @@ def _build_mssql_odbc_connect() -> str:
     driver   = os.environ.get("DB_DRIVER", "ODBC Driver 17 for SQL Server").strip()
 
     if not server:
-        raise RuntimeError(
-            "[TaskFlow] DB_SERVER chưa được cấu hình.\n"
-            "Tạo file .env từ .env.example và điền DB_SERVER."
+        raise ValueError(
+            "[TaskFlow] DB_SERVER chưa được cấu hình."
         )
 
     parts = [
@@ -46,40 +57,67 @@ def _build_mssql_odbc_connect() -> str:
     return ";".join(parts) + ";"
 
 
-def _create_engine_mssql():
-    from urllib.parse import quote_plus
-
+def _create_engine():
     explicit_url = os.environ.get("DATABASE_URL", "").strip()
+    db_type = os.environ.get("DB_TYPE", "").strip().lower()
+
     if explicit_url:
-        connect_url = explicit_url
-    else:
+        if explicit_url.startswith("sqlite"):
+            eng = create_engine(explicit_url, echo=False, connect_args={"check_same_thread": False})
+            print(f"[TaskFlow] Cơ sở dữ liệu: SQLite ({explicit_url})")
+            return eng, "sqlite"
+        eng = create_engine(explicit_url, echo=False, pool_pre_ping=True)
+        print(f"[TaskFlow] Cơ sở dữ liệu: Custom URL ({explicit_url.split('@')[-1] if '@' in explicit_url else explicit_url[:25]})")
+        return eng, explicit_url.split(":")[0]
+
+    # Explicitly requested SQLite or no DB_SERVER provided
+    server = os.environ.get("DB_SERVER", "").strip()
+    if db_type == "sqlite" or (not db_type and not server):
+        db_path = _get_sqlite_path()
+        eng = create_engine(f"sqlite:///{db_path}", echo=False, connect_args={"check_same_thread": False})
+        print(f"[TaskFlow] Cơ sở dữ liệu: SQLite ({db_path}) [Hỗ trợ mượt mà Windows, Linux, macOS]")
+        return eng, "sqlite"
+
+    # Try MSSQL
+    try:
+        from urllib.parse import quote_plus
         odbc_connect = _build_mssql_odbc_connect()
         connect_url = f"mssql+pyodbc:///?odbc_connect={quote_plus(odbc_connect)}"
-
-    try:
         import pyodbc  # noqa: F401
-    except ModuleNotFoundError:
-        raise RuntimeError(
-            "[TaskFlow] pyodbc chưa được cài. Chạy: pip install pyodbc"
+
+        eng = create_engine(
+            connect_url,
+            echo=False,
+            pool_pre_ping=True,
+            connect_args={"fast_executemany": True},
         )
-
-    eng = create_engine(
-        connect_url,
-        echo=False,
-        pool_pre_ping=True,
-        connect_args={"fast_executemany": True},
-    )
-    with eng.connect():
-        pass
-
-    server_hint = os.environ.get("DB_SERVER", "")
-    print(f"[TaskFlow] Connected to SQL Server: {server_hint}/{os.environ.get('DB_NAME', 'taskflow')}")
-    logger.info("Connected to SQL Server.")
-    return eng
+        with eng.connect():
+            pass
+        print(f"[TaskFlow] Cơ sở dữ liệu: SQL Server ({server}/{os.environ.get('DB_NAME', 'taskflow')})")
+        logger.info("Connected to SQL Server.")
+        return eng, "mssql"
+    except Exception as e:
+        logger.warning(f"Không thể kết nối SQL Server ({e}). Đang tự động chuyển sang SQLite...")
+        print(f"[TaskFlow] Cảnh báo kết nối SQL Server ({e}).")
+        print("[TaskFlow] Tự động chuyển sang SQLite để đảm bảo ứng dụng chạy tốt trên mọi hệ điều hành (Windows, Linux, macOS).")
+        db_path = _get_sqlite_path()
+        eng = create_engine(f"sqlite:///{db_path}", echo=False, connect_args={"check_same_thread": False})
+        return eng, "sqlite"
 
 
-engine = _create_engine_mssql()
-DB_BACKEND = "mssql"
+@event.listens_for(Engine, "connect")
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    if "sqlite" in str(type(dbapi_connection)).lower():
+        try:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.close()
+        except Exception:
+            pass
+
+
+engine, DB_BACKEND = _create_engine()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -226,5 +264,24 @@ class ProductivityLogModel(Base):
     focus_time_minutes: Mapped[int] = mapped_column(Integer, default=0)
     completed_tasks_count: Mapped[int] = mapped_column(Integer, default=0)
 
-# Initialize schema
+class ScheduleBlockModel(Base):
+    __tablename__ = "schedule_blocks"
+    id: Mapped[str] = mapped_column(Unicode(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(Unicode(36), index=True)
+    task_id: Mapped[Optional[str]] = mapped_column(Unicode(36), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(Unicode(500))
+    start_at: Mapped[str] = mapped_column(Unicode(50), index=True)
+    end_at: Mapped[str] = mapped_column(Unicode(50))
+    source: Mapped[str] = mapped_column(Unicode(30), default="manual")
+
+
+class TaskTrashModel(Base):
+    __tablename__ = "task_trash"
+    id: Mapped[str] = mapped_column(Unicode(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(Unicode(36), index=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+    deleted_at: Mapped[str] = mapped_column(Unicode(50))
+
+
+# Initialize schema; new local workspace tables are additive.
 Base.metadata.create_all(bind=engine)

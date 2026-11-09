@@ -27,12 +27,10 @@ _load_dotenv()
 
 # Model fallback chain: thử lần lượt khi gặp lỗi
 _MODEL_CHAIN = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
+    "gemini-3.1-flash-lite",
 ]
-_API_KEY = os.getenv("GEMINI_API_KEY", "")
-if not _API_KEY:
+_API_KEY = '' if os.getenv('TASKFLOW_API_URL') else os.getenv("GEMINI_API_KEY", "")
+if not _API_KEY and not os.getenv('TASKFLOW_API_URL'):
     print("[TaskFlow WARNING] GEMINI_API_KEY chưa được cấu hình.")
     print("[TaskFlow WARNING] Tạo file .env từ .env.example và thêm API key.")
 _MAX_RETRIES = 2
@@ -392,8 +390,8 @@ def _call_gemini(client, model: str, contents, sys_prompt: str):
     """Gọi Gemini API với một model cụ thể."""
     config = types.GenerateContentConfig(
         system_instruction=sys_prompt,
-        # Tắt extended thinking — giảm latency đáng kể cho gemini-2.5-flash
-        thinking_config=types.ThinkingConfig(thinking_budget=0),
+        # Keep interactive requests responsive with a supported Gemini 3 setting.
+        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW),
     )
     return client.models.generate_content(
         model=model,
@@ -486,9 +484,9 @@ Quy tắc:
 - Chọn category phù hợp nhất với nội dung"""
 
         resp = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-3.1-flash-lite",
             contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
-            config=types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_budget=0)),
+            config=types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)),
         )
         raw = resp.text.strip()
         # Strip markdown code fences if present
@@ -549,9 +547,9 @@ JSON nếu có task:
   "reminder_minutes": 0
 }}"""
         resp = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-3.1-flash-lite",
             contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
-            config=types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_budget=0)),
+            config=types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)),
         )
         raw = resp.text.strip()
         raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
@@ -613,9 +611,9 @@ Phân tích và tạo task từ nội dung trên. Trả về JSON (chỉ JSON):
   "reminder_minutes": 0
 }}"""
         resp = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-3.1-flash-lite",
             contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
-            config=types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_budget=0)),
+            config=types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)),
         )
         raw = resp.text.strip()
         raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
@@ -641,6 +639,14 @@ def get_ai_reply(settings: dict, message: str, user_id: str,
 
 def get_gemini_reply(message: str, user_id: str, session_id: str,
                      image_path: str = None) -> str:
+    from core.cloud import CloudClient, CloudError, generate_ai
+    if CloudClient(user_id).configured:
+        try:
+            session = ChatService.get_session(user_id, session_id)
+            history = '\n'.join(item['role'] + ': ' + item['text'] for item in (session or {}).get('messages', [])[-20:])
+            return generate_ai(user_id, (history + '\n' + message)[-60000:], _get_system_prompt(_get_cached_context(user_id)), image_path=image_path)
+        except CloudError as exc:
+            return str(exc)
     try:
         if not _API_KEY:
             return (
@@ -729,7 +735,8 @@ def get_gemini_reply(message: str, user_id: str, session_id: str,
 def extract_memory_from_user_message(user_id: str, message: str) -> None:
     """Dùng Gemini trích xuất thói quen/sở thích/mục tiêu từ tin nhắn user và lưu vào ai_memory.
     Chạy trong background thread — không block UI."""
-    if not _API_KEY or len(message.strip()) < 15:
+    from core.cloud import CloudClient
+    if CloudClient(user_id).configured or not _API_KEY or len(message.strip()) < 15:
         return
     try:
         import json as _json
@@ -764,10 +771,10 @@ Ví dụ trích xuất hợp lệ:
 - "Tôi không thích task hành chính" → preference: dislike_category="administrative", confidence=0.7"""
 
         resp = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-3.1-flash-lite",
             contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
             config=types.GenerateContentConfig(
-                thinking_config=types.ThinkingConfig(thinking_budget=0)
+                thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)
             ),
         )
         raw = resp.text.strip()

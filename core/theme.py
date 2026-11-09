@@ -1,76 +1,53 @@
-"""
-TaskFlow - Modern Mobile App Theme
-Light, vibrant design with White and Blue (Primary) palette
-"""
+"""TaskFlow desktop palette: white surfaces, black ink and neutral separators."""
 
-# ─── COLOR PALETTE ────────────────────────────────────────────────────────────
 class Colors:
-    # ── Backgrounds (Light Theme) ──
-    BG_DARKEST   = "#F3F4F6"  # Light gray background (app background)
-    BG_DARK      = "#F9FAFB"  # Slightly lighter background
-    BG_CARD      = "#FFFFFF"  # Pure white card background
-    BG_CARD_HOVER= "#F3F4F6"  # Card hover state
-    BG_SURFACE   = "#FFFFFF"  # Surface elements
-    BG_INPUT     = "#F9FAFB"  # Input background
-    BG_OVERLAY   = "#40000000" # Overlay (darkened for modal)
-
-    # ── Primary (Blue) ──
-    PRIMARY      = "#2563EB"   # Tailwind Blue 600 - Main Brand Color
-    PRIMARY_LIGHT  = "#3B82F6"  # Tailwind Blue 500
-    PRIMARY_DARK   = "#1D4ED8"  # Tailwind Blue 700
-    PRIMARY_BG     = "#EFF6FF"  # Blue-50 - very light tint (icon backgrounds)
-    PRIMARY_BG_MED = "#DBEAFE"  # Blue-100 - slightly deeper tint
-    PRIMARY_BORDER = "#BFDBFE"  # Blue-200 - border around primary elements
-    PRIMARY_SHADOW = "#402563EB" # Blue shadow 25%
-
-    # ── Secondary & Grays ──
-    SECONDARY    = "#6B7280"   # Light Gray for sub-elements
-    SECONDARY_LIGHT = "#9CA3AF"
-
-    # ── Accent ──
-    ACCENT_WARM  = "#F3F4F6"
+    BG_DARKEST = "#FFFFFF"
+    BG_DARK = "#FFFFFF"
+    BG_CARD = "#FFFFFF"
+    BG_CARD_HOVER = "#F5F5F5"
+    BG_SURFACE = "#FFFFFF"
+    BG_INPUT = "#FFFFFF"
+    BG_OVERLAY = "#40000000"
+    PRIMARY = "#111111"
+    PRIMARY_LIGHT = "#333333"
+    PRIMARY_DARK = "#000000"
+    PRIMARY_BG = "#F5F5F5"
+    PRIMARY_BG_MED = "#EEEEEE"
+    PRIMARY_BORDER = "#DDDDDD"
+    PRIMARY_SHADOW = "#00000000"
+    SECONDARY = "#666666"
+    SECONDARY_LIGHT = "#767676"
+    ACCENT_WARM = "#F5F5F5"
     ACCENT_WARM_LIGHT = "#FFFFFF"
-    ACCENT_TEAL  = "#0D9488"   # Teal
-    ACCENT_CYAN  = "#0891B2"   # Cyan
-    ACCENT_BLUE  = "#3B82F6"   # Blue
-    ACCENT_GRAY  = "#9CA3AF"   # Neutral gray
-
-    # ── Text Colors ──
-    TEXT_PRIMARY   = "#111827"  # Very dark gray (almost black)
-    TEXT_SECONDARY = "#4B5563"  # Medium-dark gray
-    TEXT_MUTED     = "#9CA3AF"  # Light gray placeholder
-    TEXT_ON_PRIMARY = "#FFFFFF" # White text on blue bg
-
-    # ── Status Colors ──
-    SUCCESS      = "#10B981"   # Emerald green
-    WARNING      = "#F59E0B"   # Amber/Orange
-    ERROR        = "#EF4444"   # Red
-    INFO         = "#3B82F6"   # Blue
-
-    # ── Borders ──
-    BORDER       = "#E5E7EB"   # Very light gray border
-    BORDER_LIGHT = "#F3F4F6"   # Extremely light border
-    BORDER_GLOW  = "#93C5FD"   # Blue glow border
-
-    # ── Priority colors ──
-    PRIORITY_HIGH   = "#EF4444"
-    PRIORITY_MEDIUM = "#F59E0B"
-    PRIORITY_LOW    = "#10B981"
-
-    # ── Category colors ──
-    CAT_WORK      = "#3B82F6"   # Blue
-    CAT_PERSONAL  = "#8B5CF6"   # Purple
-    CAT_HEALTH    = "#10B981"   # Green
-    CAT_FINANCE   = "#F59E0B"   # Amber
-    CAT_EDUCATION = "#06B6D4"   # Cyan
-
-    # ── Aliases ──
-    VIOLET       = "#8B5CF6"
-    CYAN         = "#06B6D4"
-    EMERALD      = "#10B981"
-    ROSE         = "#F43F5E"
-    AMBER        = "#F59E0B"
-    GRAY         = "#6B7280"
+    ACCENT_TEAL = "#111111"
+    ACCENT_CYAN = "#111111"
+    ACCENT_BLUE = "#111111"
+    ACCENT_GRAY = "#666666"
+    TEXT_PRIMARY = "#111111"
+    TEXT_SECONDARY = "#555555"
+    TEXT_MUTED = "#666666"
+    TEXT_ON_PRIMARY = "#FFFFFF"
+    SUCCESS = "#111111"
+    WARNING = "#111111"
+    ERROR = "#111111"
+    INFO = "#111111"
+    BORDER = "#E5E5E5"
+    BORDER_LIGHT = "#F1F1F1"
+    BORDER_GLOW = "#DDDDDD"
+    PRIORITY_HIGH = "#111111"
+    PRIORITY_MEDIUM = "#555555"
+    PRIORITY_LOW = "#666666"
+    CAT_WORK = "#111111"
+    CAT_PERSONAL = "#111111"
+    CAT_HEALTH = "#111111"
+    CAT_FINANCE = "#111111"
+    CAT_EDUCATION = "#111111"
+    VIOLET = "#111111"
+    CYAN = "#111111"
+    EMERALD = "#111111"
+    ROSE = "#111111"
+    AMBER = "#111111"
+    GRAY = "#666666"
 
 
 class Typography:
@@ -79,9 +56,9 @@ class Typography:
     H2       = 20
     H3       = 18
     H4       = 16
-    BODY     = 14
-    SMALL    = 13
-    TINY     = 11
+    BODY     = 17
+    SMALL    = 16
+    TINY     = 14
 
     THIN     = "w100"
     LIGHT    = "w300"
@@ -112,11 +89,11 @@ class Radius:
 
 PRIORITY_MAP = {
     "high":   {"color": Colors.PRIORITY_HIGH,   "label": "Cao",  "icon": "🔴",
-               "bg": "#FEE2E2", "border_light": "#FECACA", "shadow": "#30EF4444"},
+               "bg": "#F0F0F0", "border_light": "#CCCCCC", "shadow": "#18000000"},
     "medium": {"color": Colors.PRIORITY_MEDIUM, "label": "Vừa", "icon": "🟡",
-               "bg": "#FEF3C7", "border_light": "#FDE68A", "shadow": "#30F59E0B"},
+               "bg": "#F5F5F5", "border_light": "#DDDDDD", "shadow": "#10000000"},
     "low":    {"color": Colors.PRIORITY_LOW,    "label": "Thấp", "icon": "🟢",
-               "bg": "#D1FAE5", "border_light": "#A7F3D0", "shadow": "#3010B981"},
+               "bg": "#FAFAFA", "border_light": "#E5E5E5", "shadow": "#08000000"},
 }
 
 CATEGORY_MAP = {

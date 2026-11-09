@@ -1,5 +1,5 @@
 # ── Core UI ───────────────────────────────────────────────────
-flet>=0.84.0
+flet>=1.0.5,<1.1
 
 # ── AI / Gemini ────────────────────────────────────────────────
 google-genai>=1.68.0
@@ -13,12 +13,14 @@ bcrypt>=4.0.0
 
 # ── Voice Input (ghi âm + nhận dạng giọng nói) ────────────────
 sounddevice>=0.4.0
+soundfile>=0.12.0
 SpeechRecognition>=3.10.0
 numpy>=1.24.0
 
 # ── Voice Output / TTS ─────────────────────────────────────────
 gTTS>=2.3.0
-pygame>=2.5.0
+pygame-ce>=2.5.0; python_version >= '3.14'
+pygame>=2.5.0; python_version < '3.14'
 pyttsx3>=2.90
 
 # ── OCR (quét ảnh → task) ──────────────────────────────────────
@@ -35,3 +37,7 @@ plyer>=2.1.0
 
 # ── Utilities ──────────────────────────────────────────────────
 python-dotenv>=1.0.0
+qrcode[pil]>=8.0
+pystray>=0.19,<1
+keyring>=25,<27
+tzdata>=2025

@@ -32,6 +32,14 @@ class AuthService:
 
     @classmethod
     def register(cls, username, email, password, full_name="") -> tuple:
+        from core.cloud import CloudClient, CloudError
+        client = CloudClient()
+        if client.configured:
+            try:
+                result = client.request('POST', '/v1/auth/register', {'username': username, 'email': email, 'password': password, 'name': full_name}, False)
+                return True, result['message']
+            except CloudError as exc:
+                return False, str(exc)
         if Storage.find_user(username=username):
             return False, "Tên đăng nhập đã tồn tại"
         if Storage.find_user(email=email):
@@ -48,9 +56,22 @@ class AuthService:
 
     @classmethod
     def login(cls, username, password) -> tuple:
+        from core.cloud import CloudClient, CloudError
+        client = CloudClient()
+        if client.configured:
+            try:
+                account = client.login(username, password)
+                user = cls.cache_cloud_account(account)
+                return True, 'Đã đăng nhập tài khoản đồng bộ.', user
+            except (CloudError, ValueError) as exc:
+                from core.cloud import clear_session
+                clear_session()
+                return False, str(exc), None
         user = Storage.find_user(username=username)
         if not user:
             return False, "Tên đăng nhập không tồn tại", None
+        if user.password_hash == 'remote-account':
+            return False, 'Tài khoản này cần kết nối máy chủ để đăng nhập.', None
         if not cls.verify_password(password, user.password_hash):
             return False, "Mật khẩu không đúng", None
         Storage.set_session(user.id)
@@ -58,8 +79,51 @@ class AuthService:
         return True, "Đăng nhập thành công", user
 
     @staticmethod
+    def cache_cloud_account(account):
+        cached_email = account.get('email') or 'cloud-' + account['id'] + '@taskflow.test'
+        email_collision = Storage.find_user(email=cached_email)
+        if email_collision and email_collision.id != account['id']:
+            cached_email = 'cloud-' + account['id'] + '@taskflow.test'
+        user = next((u for u in Storage.get_users() if u.id == account['id']), None)
+        if user is None:
+            cached_name = account['username']
+            collision = Storage.find_user(username=cached_name)
+            if collision and collision.id != account['id']:
+                cached_name += '_' + account['id'][:8]
+            user = User(id=account['id'], username=cached_name, email=cached_email,
+                        full_name=account['name'], password_hash='remote-account')
+        else:
+            user.email = cached_email
+            user.password_hash = 'remote-account'
+        user.settings = dict(user.settings, cloud_email=account.get('email', ''), cloud_username=account['username'])
+        Storage.save_user(user)
+        Storage.set_session(user.id)
+        from core.access import access_for
+        access_for(user.id, refresh=True)
+        return user
+
+    @classmethod
+    def finish_social_login(cls, result):
+        from core.cloud import CloudClient, clear_session
+        try:
+            account = CloudClient().accept_login(result)
+            return cls.cache_cloud_account(account)
+        except Exception:
+            clear_session()
+            raise
+
+    @staticmethod
     def logout():
+        from core.cloud import clear_session, session_for, revoke_session
+        current = session_for()
+        if current:
+            from core.token_vault import remove
+            remove(current['url'], current['account_id'])
+        clear_session()
         Storage.set_session(None)
+        if current:
+            import threading
+            threading.Thread(target=revoke_session, args=(current,), daemon=True).start()
 
     @staticmethod
     def get_current_user() -> Optional[User]:
@@ -73,6 +137,15 @@ class AuthService:
 
     @classmethod
     def change_password(cls, user, old_password, new_password, confirm_password) -> tuple:
+        if user.password_hash == 'remote-account':
+            from core.cloud import CloudClient, CloudError
+            if new_password != confirm_password:
+                return False, 'Mật khẩu mới không khớp.'
+            try:
+                result = CloudClient(user.id).request('POST', '/v1/auth/change-password', {'old_password': old_password, 'password': new_password})
+                return True, result['message']
+            except CloudError as exc:
+                return False, str(exc)
         if not old_password or not new_password:
             return False, "Vui lòng nhập đầy đủ!"
         if not cls.verify_password(old_password, user.password_hash):
@@ -81,8 +154,10 @@ class AuthService:
             return False, "Mật khẩu mới không khớp!"
         if len(new_password) < 6:
             return False, "Mật khẩu tối thiểu 6 ký tự!"
-        user.password_hash = cls.hash_password(new_password)
-        Storage.save_user(user)
+        from dataclasses import replace
+        candidate = replace(user, password_hash=cls.hash_password(new_password))
+        Storage.save_user(candidate)
+        user.password_hash = candidate.password_hash
         return True, "Đã đổi mật khẩu thành công ✓"
 
     @staticmethod
@@ -120,7 +195,12 @@ class TaskService:
         return sorted(tasks, key=sort_key)
 
     @staticmethod
-    def save_task(task: Task):
+    def save_task(task: Task, expected_revision=None):
+        if task.is_recurring:
+            existing = next((item for item in Storage.get_tasks(task.user_id) if item.id == task.id), None)
+            if existing is None or not existing.is_recurring or existing.recur_pattern != task.recur_pattern:
+                from core.access import require_feature
+                require_feature(task.user_id, "recurrence")
         # Calculate workload score
         energy_map = {"low": 3, "medium": 5, "high": 8}
         focus_map = {"low": 3, "medium": 5, "high": 8}
@@ -153,7 +233,7 @@ class TaskService:
         except Exception:
             logger.exception("AdaptivePriorityEngine failed for task %s", task.id)
 
-        is_new = Storage.save_task(task)
+        is_new = Storage.save_task(task, expected_revision=expected_revision)
 
         # Log task creation behavior so AI can learn from it
         if is_new:
@@ -188,7 +268,13 @@ class TaskService:
 
     @staticmethod
     def delete_task(task_id: str, user_id: str = None):
-        Storage.delete_task(task_id)
+        from core.workspace import Workspace
+        if not user_id:
+            user = AuthService.get_current_user()
+            user_id = user.id if user else None
+        if not user_id:
+            raise ValueError("Hãy đăng nhập trước khi xóa công việc.")
+        Workspace.trash_task(user_id, task_id)
         if user_id:
             try:
                 AnalyticsService.invalidate_cache(user_id)
@@ -197,10 +283,12 @@ class TaskService:
 
     @staticmethod
     def toggle_done(task: Task) -> Task:
+        revision = task.updated_at
         was_done = task.status == "done"
         task.status = "done" if not was_done else "todo"
+        task.completed_at = datetime.now().isoformat() if task.status == 'done' else None
+        Storage.save_task(task, expected_revision=revision)
         if task.status == "done":
-            task.completed_at = datetime.now().isoformat()
             BehaviorService.log(task.user_id, "task_complete", {
                 "task_id": task.id, "category": task.category,
                 "priority": task.priority, "title": task.title,
@@ -214,9 +302,6 @@ class TaskService:
                 })
             except Exception:
                 pass
-        else:
-            task.completed_at = None
-        Storage.save_task(task)
         try:
             AnalyticsService.invalidate_cache(task.user_id)
         except Exception:
@@ -252,7 +337,7 @@ class TaskService:
         tasks = Storage.get_tasks(user_id)
         due_now = []
         for t in tasks:
-            if t.status != "done" and getattr(t, "reminder_minutes", 0) > 0:
+            if t.status not in ("done", "cancelled") and getattr(t, "reminder_minutes", 0) > 0:
                 tdate = t.due_date or t.start_date
                 ttime = t.due_time
                 if tdate and ttime:
@@ -633,7 +718,8 @@ class ProjectService:
             for entry in entries:
                 if entry.get("key", "").startswith(cls._MEM_KEY_PREFIX):
                     try:
-                        data = _json.loads(entry.get("value", "{}"))
+                        raw = entry.get("value", {})
+                        data = raw if isinstance(raw, dict) else _json.loads(raw)
                         pid = entry["key"][len(cls._MEM_KEY_PREFIX):]
                         projects.append(Project(
                             id=pid,
@@ -649,21 +735,19 @@ class ProjectService:
 
     @classmethod
     def save_project(cls, project) -> None:
-        try:
-            import json as _json
-            data = _json.dumps({
-                "name": project.name,
-                "color": getattr(project, "color", "#7C3AED"),
-                "description": getattr(project, "description", ""),
-            })
-            Storage.set_memory(project.user_id, "project",
-                               f"{cls._MEM_KEY_PREFIX}{project.id}", data, 1.0)
-        except Exception:
-            pass
+        from core.access import require_feature
+        require_feature(project.user_id, "projects")
+        import json as _json
+        if not project.user_id or not project.name.strip() or len(project.name) > 200:
+            raise ValueError("Tên dự án cần từ 1 đến 200 ký tự.")
+        data = _json.dumps({"name": project.name.strip(), "color": "#111111",
+                           "description": getattr(project, "description", "")}, ensure_ascii=False)
+        Storage.set_memory(project.user_id, "project", f"{cls._MEM_KEY_PREFIX}{project.id}", data, 1.0)
 
     @classmethod
     def delete_project(cls, project_id: str, user_id: str = "") -> None:
-        pass  # TODO: add delete_memory to Storage when needed
+        from core.workspace import Workspace
+        Workspace.delete_project(user_id, project_id)
 
     @staticmethod
     def get_project_stats(user_id: str, project_id: str) -> dict:
