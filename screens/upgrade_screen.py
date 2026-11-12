@@ -12,7 +12,7 @@ def build_locked(page, user, navigate, feature):
     return ft.Column([
         ft.Icon(ft.Icons.LOCK_OUTLINE, size=30, color="#111111"),
         ft.Text(label, size=28, weight=ft.FontWeight.W_600),
-        ft.Text(f"Tính năng này có trong gói {required.title()} và Pro.", color="#666666"),
+        ft.Text("Tính năng này có trong gói Pro." if required == "pro" else f"Tính năng này có trong gói {required.title()} và Pro.", color="#666666"),
         ft.Row([ft.OutlinedButton("Xem các gói nâng cấp", icon=ft.Icons.ARROW_FORWARD, on_click=lambda e: navigate("plans"))]),
         ft.Text("Dữ liệu hiện có của bạn vẫn được giữ.", size=13, color="#666666"),
     ], spacing=20, expand=True)
@@ -30,6 +30,8 @@ def build_upgrade(page, user, navigate):
     def render(update=True):
         current = access_for(user.id)
         status.value = f"Gói hiện tại: {current.plan.title()}"
+        if current.source == 'owner':
+            status.value += ' · Admin · Quyền chủ ứng dụng'
         if current.valid_until:
             status.value += ' · Hết hạn ' + current.valid_until[:10]
         if current.source in ("unavailable", "pending"):

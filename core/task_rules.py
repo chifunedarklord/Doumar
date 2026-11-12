@@ -39,3 +39,22 @@ def next_occurrence(task, today=None):
         created_at=now, updated_at=now, subtasks=subtasks, actual_minutes=0,
         postpone_count=0, interruption_count=0, focus_score=0,
     )
+
+
+def subtask_done(item):
+    # status is authoritative; support old checklists that only contain done.
+    return item.get('status') == 'done' if 'status' in item else item.get('done') is True
+
+
+def reconcile_subtasks(task):
+    """Derive parent completion, preserving cancellation and completion timestamp."""
+    if not task.subtasks or task.status == 'cancelled':
+        return task
+    complete = sum(subtask_done(item) for item in task.subtasks)
+    if complete == len(task.subtasks):
+        task.status = 'done'
+        task.completed_at = task.completed_at or datetime.now().isoformat()
+    else:
+        task.status = 'in_progress' if complete else 'todo'
+        task.completed_at = None
+    return task

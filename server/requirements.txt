@@ -7,3 +7,6 @@ cryptography>=43
 tzdata>=2025
 # Production on Linux behind an HTTPS reverse proxy, not the development WSGI server.
 gunicorn>=23.0.0; sys_platform != 'win32'
+
+# Validate uploaded images before sending them to AI.
+Pillow>=10.0.0

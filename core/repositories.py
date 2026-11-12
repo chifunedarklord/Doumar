@@ -117,7 +117,9 @@ class Storage:
     def save_task(cls, task: Task, expected_revision=None) -> bool:
         """Save task (upsert). Returns True if this was a new task, False if update."""
         from core.workspace import validate_task
+        from core.task_rules import reconcile_subtasks
         validate_task(task)
+        reconcile_subtasks(task)
         task.updated_at = datetime.now().isoformat()
         with SessionLocal() as db:
             if expected_revision is not None and db.bind.dialect.name == 'sqlite':
@@ -224,7 +226,8 @@ class Storage:
         t.focus_score = getattr(m, "focus_score", 0.0)
         t.deadline_type = getattr(m, "deadline_type", "soft")
         t.project_id = getattr(m, "project_id", None)
-        return t
+        from core.task_rules import reconcile_subtasks
+        return reconcile_subtasks(t)
 
     # ── Chat Sessions ──────────────────────────────────────────────────────────
     @classmethod
@@ -233,7 +236,7 @@ class Storage:
             models = db.query(ChatSessionModel).filter(ChatSessionModel.user_id == user_id).order_by(ChatSessionModel.updated_at.desc()).all()
             result = []
             for m in models:
-                msgs = db.query(ChatMessageModel).filter(ChatMessageModel.session_id == m.id).order_by(ChatMessageModel.id.asc()).all()
+                msgs = db.query(ChatMessageModel).filter(ChatMessageModel.session_id == m.id, ChatMessageModel.user_id == user_id).order_by(ChatMessageModel.id.asc()).all()
                 result.append({
                     "id": m.id,
                     "title": m.title,
@@ -248,7 +251,7 @@ class Storage:
             m = db.query(ChatSessionModel).filter(ChatSessionModel.id == session_id, ChatSessionModel.user_id == user_id).first()
             if not m:
                 return None
-            msgs = db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).order_by(ChatMessageModel.id.asc()).all()
+            msgs = db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id, ChatMessageModel.user_id == user_id).order_by(ChatMessageModel.id.asc()).all()
             return {
                 "id": m.id,
                 "title": m.title,
@@ -268,10 +271,14 @@ class Storage:
     @classmethod
     def add_chat_message(cls, user_id: str, session_id: str, role: str, text: str):
         now = datetime.now().isoformat()
+        if role not in ('user', 'model', 'assistant') or not isinstance(text, str):
+            raise ValueError('Tin nhắn không hợp lệ.')
         with SessionLocal() as db:
+            sess = db.query(ChatSessionModel).filter_by(id=session_id, user_id=user_id).first()
+            if sess is None:
+                raise ValueError('Hội thoại không thuộc tài khoản hiện tại hoặc đã bị xóa.')
             db.add(ChatMessageModel(session_id=session_id, user_id=user_id, role=role, text=text, timestamp=now))
             count = db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).count()
-            sess = db.query(ChatSessionModel).filter(ChatSessionModel.id == session_id).first()
             if sess:
                 if sess.title == "Chat mới" and role == "user" and count <= 2:
                     sess.title = text[:30] + ("..." if len(text) > 30 else "")

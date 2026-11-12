@@ -1,6 +1,8 @@
 """Validation of the account workspace wire format, independent of the database."""
 from datetime import date, datetime
 from core.models import Task
+from core.task_validation import validate_task
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 MEMORY_TYPES = ('project', 'recurrence', 'preference', 'habit', 'goal', 'state', 'performance')
 
@@ -20,6 +22,10 @@ def validate_snapshot(payload):
             raise ValueError('Thông tin tài khoản đồng bộ không hợp lệ.')
         string(profile['full_name'], 200, True)
         string(profile['timezone'], 50)
+        try:
+            ZoneInfo(profile['timezone'])
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError('Múi giờ đồng bộ không hợp lệ.') from exc
         begin, finish = (datetime.strptime(profile[key], '%H:%M') for key in ('work_start', 'work_end'))
         if finish <= begin:
             raise ValueError('Giờ làm việc đồng bộ không hợp lệ.')
@@ -35,6 +41,7 @@ def validate_snapshot(payload):
         identities[key] = set(ids)
     for raw in payload.get('tasks', []) + [row.get('payload', {}) for row in payload.get('trash', [])]:
         task = Task(**raw)
+        validate_task(task)
         string(task.id, 128)
         string(task.title)
         for field in ('description', 'notes'):

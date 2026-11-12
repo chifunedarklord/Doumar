@@ -150,12 +150,10 @@ def get_refine_options(intent: str) -> list:
 # ── Planner system prompt ─────────────────────────────────────────────────────
 
 def _get_planner_prompt(context: str) -> str:
-    today = date.today()
-    tomorrow = today + timedelta(days=1)
-    return f"""Bạn là AI Planner cá nhân của TaskFlow. LUÔN trả về JSON hợp lệ. KHÔNG dùng markdown, KHÔNG có text ngoài JSON.
+    from core.ai_policy import DOUMAR_POLICY
+    return DOUMAR_POLICY + f"""\nBạn là AI Planner cá nhân của TaskFlow. LUÔN trả về JSON hợp lệ. KHÔNG dùng markdown, KHÔNG có text ngoài JSON.
 
-Hôm nay: {today.isoformat()} ({today.strftime('%A')})
-Ngày mai: {tomorrow.isoformat()}
+Ngày và múi giờ: dùng [ACCOUNT TIME] trong dữ liệu tài khoản; không dùng ngày máy chủ.
 
 DỮ LIỆU NGƯỜI DÙNG (từ SQL Server):
 {context}
@@ -166,7 +164,9 @@ DỮ LIỆU NGƯỜI DÙNG (từ SQL Server):
   "intent": "study_plan|project_plan|travel_plan|work_plan|content_plan|business_plan|health_plan|daily_plan|event_plan|unknown",
   "title": "Tiêu đề kế hoạch ngắn gọn (tối đa 60 ký tự)",
   "summary": "Tóm tắt 1-2 câu về kế hoạch và mục tiêu",
-  "assumptions": ["Giả định khi thiếu thông tin — luôn có nếu info chưa đủ"],
+  "ready_to_save": false,
+  "missing_information": ["Thông tin cần người dùng xác nhận; rỗng khi đã đủ"],
+  "assumptions": ["Chỉ liệt kê điều cần xác nhận; rỗng nếu không có, không bịa giả định"],
   "personalization_used": ["Danh sách thói quen/dữ liệu người dùng đã áp dụng, vd: giờ vàng 9h-11h, năng lượng cao buổi sáng, hay trì hoãn task work"],
   "plan": [
     {{
@@ -183,10 +183,13 @@ DỮ LIỆU NGƯỜI DÙNG (từ SQL Server):
       "estimated_minutes": 60,
       "due_date": "YYYY-MM-DD hoặc null",
       "due_time": "HH:MM hoặc null",
-      "category": "work|personal|health|finance|education"
+      "category": "work|personal|health|finance|education",
+      "start_at": "YYYY-MM-DDTHH:MM hoặc null, giờ THỰC HIỆN, không phải hạn chót",
+      "end_at": "YYYY-MM-DDTHH:MM hoặc null",
+      "subtasks": [{{"title": "Bước cần làm", "status": "todo", "priority": "high|medium|low", "estimated_minutes": null, "due_date": null, "due_time": null, "start_at": null, "end_at": null}}]
     }}
   ],
-  "follow_up_question": "Câu hỏi ngắn để tinh chỉnh kế hoạch (1 câu duy nhất)",
+  "follow_up_question": "1–3 câu cần thiết hoặc lời mời chọn công việc và xác nhận lưu",
   "refine_options": ["Chi tiết từng bước hơn", "Chia theo giờ cụ thể", "Thêm deadline và nhắc việc", "Chia nhỏ thành task để lưu vào app", "Tối ưu theo thời gian rảnh", "Tối ưu theo ngân sách", "Thêm phương án dự phòng"]
 }}
 
@@ -194,30 +197,31 @@ DỮ LIỆU NGƯỜI DÙNG (từ SQL Server):
 {{"type": "normal_chat", "message": "Câu trả lời tiếng Việt, tối đa 150 từ, tự nhiên"}}
 
 === SCHEMA: TẠO TASK ĐƠN LẺ ===
-{{"type": "task_create", "title": "...", "description": "...", "category": "work|personal|health|finance|education", "priority": "high|medium|low", "due_date": "YYYY-MM-DD hoặc null", "due_time": "HH:MM hoặc null", "estimated_minutes": 30, "reminder_minutes": 15}}
+{{"type": "task_create", "ready_to_save": false, "missing_information": [], "follow_up_question": "", "start_at": null, "end_at": null, "subtasks": [], "title": "...", "description": "...", "category": "work|personal|health|finance|education", "priority": "high|medium|low", "due_date": "YYYY-MM-DD hoặc null", "due_time": "HH:MM hoặc null", "estimated_minutes": 30, "reminder_minutes": 15}}
 
 === NGUYÊN TẮC BẮT BUỘC ===
-1. LUÔN tạo kế hoạch nháp ngay — KHÔNG hỏi thông tin trước rồi mới làm
-2. Nếu thiếu thông tin (địa điểm, ngân sách, v.v.): tạo với giả định hợp lý, ghi rõ vào "assumptions"
-3. plan phải có 3-7 bước tùy loại, mỗi bước có 2-4 details
-4. suggested_tasks phải có 3-6 task cụ thể, có thể lưu vào app ngay
-5. Luôn có follow_up_question (1 câu duy nhất) và refine_options
-6. personalization_used: liệt kê thói quen/dữ liệu trong [LEARNED HABITS] và [CURRENT STATE] đã dùng để lập kế hoạch
-7. Kế hoạch phải cá nhân hóa: task khó → giờ vàng, task nhẹ → giờ thấp năng lượng, category hay trì hoãn → chia nhỏ
-8. Ngôn ngữ: Tiếng Việt hoàn toàn
-9. JSON thuần túy — KHÔNG backtick, KHÔNG ```json"""
+1. Khi thiếu thông tin, đưa khung sơ bộ không gán giờ/hạn/địa điểm giả định; ready_to_save=false và hỏi 1–3 câu liên quan.
+2. Chỉ ready_to_save=true khi đủ thông tin, không còn giả định cần xác nhận và người dùng đã yêu cầu hoặc đồng ý nhận lịch đề xuất. Đây vẫn chưa phải đồng ý lưu.
+3. Người dùng chỉ nêu ý tưởng: hỏi có muốn xếp lịch không; đã yêu cầu lên lịch thì không hỏi lại quyền đề xuất.
+4. Chỉ xếp việc mới vào giờ trống trong SAVED CALENDAR, giữ nguyên lịch cũ; chưa đủ dữ liệu giờ rảnh thì hỏi. start_at/end_at tách biệt due_date/due_time là hạn chót.
+5. suggested_tasks là việc cha có subtasks theo thứ tự ưu tiên; không bắt buộc số lượng. Chưa có giờ thì start_at/end_at=null. Không gán hạn ngày mai nếu người dùng chưa yêu cầu.
+6. personalization_used chỉ nêu dữ liệu thực đã dùng; xu hướng chưa xác nhận phải được gọi đúng là xu hướng.
+7. Luôn có follow_up_question và refine_options phù hợp; chỉ JSON thuần túy, không backtick.
+8. Khi tin nhắn tiếp nối trả lời câu hỏi hoặc đồng ý đề xuất, kết hợp TOÀN BỘ hội thoại và kế hoạch trước để tiếp tục, không quên thông tin đã biết."""
+
 
 
 # ── Main API call ─────────────────────────────────────────────────────────────
 
 def get_plan_response(message: str, user_id: str,
-                      last_plan: dict = None, image_path: str = None, feature: str = 'ai_chat') -> dict:
+                      last_plan: dict = None, image_path: str = None, feature: str = 'ai_chat', history: str = '') -> dict:
     """
     Call Gemini for a structured planning response.
     Returns dict with 'type' key: plan_result | normal_chat | task_create.
     Supports optional image_path for image analysis.
     Never raises — always returns a valid dict.
     """
+    message = (history + '\nYêu cầu hiện tại:\n' + message) if history else message
     from core.cloud import CloudClient, CloudError, generate_ai
     if CloudClient(user_id).configured:
         try:
@@ -250,17 +254,7 @@ def get_plan_response(message: str, user_id: str,
     # When refining, include previous plan summary in user message
     user_content = message
     if last_plan and last_plan.get("type") == "plan_result":
-        plan_steps = last_plan.get("plan", [])
-        steps_text = "\n".join(
-            f"  - {s.get('time_or_step', '')}: {s.get('title', '')}"
-            for s in plan_steps[:5]
-        )
-        user_content = (
-            f"[Đang chỉnh sửa kế hoạch: {last_plan.get('title', '')}]\n"
-            f"Tóm tắt hiện tại: {last_plan.get('summary', '')}\n"
-            f"Các bước hiện tại:\n{steps_text}\n\n"
-            f"[Yêu cầu chỉnh sửa]: {message}"
-        )
+        user_content = "Kế hoạch trước (dữ liệu tham khảo):\n" + json.dumps(last_plan, ensure_ascii=False)[:16000] + "\nYêu cầu chỉnh sửa:\n" + message
 
     try:
         from google import genai
@@ -326,8 +320,24 @@ def _parse_response(raw: str, original_message: str) -> dict:
         if not isinstance(data, dict) or "type" not in data:
             raise ValueError("No 'type' key")
 
+        if data['type'] not in ('plan_result', 'normal_chat', 'task_create'):
+            raise ValueError('Unknown response type')
+        if data['type'] == 'plan_result':
+            for key in ('plan', 'suggested_tasks', 'assumptions', 'missing_information', 'personalization_used', 'refine_options'):
+                if key in data and not isinstance(data[key], list):
+                    raise ValueError('Invalid plan list: ' + key)
+            for item in data.get('suggested_tasks', []):
+                if not isinstance(item, dict) or not isinstance(item.get('title'), str) or not item['title'].strip():
+                    raise ValueError('Invalid suggested task')
+                if 'subtasks' in item and (not isinstance(item['subtasks'], list) or any(not isinstance(sub, dict) or not isinstance(sub.get('title'), str) for sub in item['subtasks'])):
+                    raise ValueError('Invalid suggested subtasks')
+            for step in data.get('plan', []):
+                if isinstance(step, dict) and 'details' in step and not isinstance(step['details'], (list, str)):
+                    raise ValueError('Invalid plan details')
         # Ensure required plan fields exist
         if data["type"] == "plan_result":
+            data.setdefault("ready_to_save", False)
+            data.setdefault("missing_information", [])
             data.setdefault("assumptions", [])
             data.setdefault("personalization_used", [])
             data.setdefault("plan", [])
@@ -351,86 +361,18 @@ def _parse_response(raw: str, original_message: str) -> dict:
 
 def _make_fallback_plan(message: str, intent: str = None) -> dict:
     """Generic plan template when AI is unavailable."""
-    intent = intent or "unknown"
-    today = date.today()
-    tomorrow = (today + timedelta(days=1)).isoformat()
-    refine_opts = get_refine_options(intent)
-
     return {
-        "type": "plan_result",
-        "intent": intent,
-        "title": f"Kế hoạch: {message[:55]}{'...' if len(message) > 55 else ''}",
-        "summary": "Kế hoạch mẫu — AI hiện không khả dụng. Bạn có thể chỉnh chi tiết hơn bên dưới.",
-        "assumptions": [
-            "Thông tin chi tiết chưa được cung cấp",
-            "Tạm giả định thời gian và nguồn lực mặc định",
-            "AI đang offline — kế hoạch được tạo bằng mẫu dự phòng",
-        ],
-        "personalization_used": [],
-        "plan": [
-            {
-                "time_or_step": "Bước 1",
-                "title": "Xác định mục tiêu rõ ràng",
-                "details": [
-                    "Ghi rõ kết quả cần đạt được",
-                    "Đặt deadline cụ thể",
-                    "Xác định tài nguyên cần có",
-                ],
-            },
-            {
-                "time_or_step": "Bước 2",
-                "title": "Chia nhỏ công việc",
-                "details": [
-                    "Tách việc lớn thành các phần nhỏ 30-60 phút",
-                    "Sắp xếp theo thứ tự ưu tiên",
-                    "Ước tính thời gian cho từng phần",
-                ],
-            },
-            {
-                "time_or_step": "Bước 3",
-                "title": "Thực hiện và theo dõi tiến độ",
-                "details": [
-                    "Bắt đầu với task quan trọng nhất",
-                    "Dùng Focus Timer để tập trung",
-                    "Cập nhật trạng thái task sau khi xong",
-                ],
-            },
-        ],
-        "suggested_tasks": [
-            {
-                "title": "Xác định mục tiêu và timeline",
-                "description": "Ghi rõ mục tiêu, deadline và tài nguyên cần có",
-                "priority": "high",
-                "estimated_minutes": 30,
-                "due_date": tomorrow,
-                "due_time": None,
-                "category": "personal",
-            },
-            {
-                "title": "Liệt kê công việc cần làm",
-                "description": "Chia nhỏ thành các task cụ thể và ước tính thời gian",
-                "priority": "high",
-                "estimated_minutes": 45,
-                "due_date": tomorrow,
-                "due_time": None,
-                "category": "personal",
-            },
-            {
-                "title": "Bắt đầu thực hiện bước đầu tiên",
-                "description": "Dùng Focus Timer để tập trung làm không gián đoạn",
-                "priority": "medium",
-                "estimated_minutes": 60,
-                "due_date": tomorrow,
-                "due_time": None,
-                "category": "personal",
-            },
-        ],
-        "follow_up_question": "Bạn muốn mình chỉnh kế hoạch chi tiết hơn theo phần nào?",
-        "refine_options": refine_opts,
+        "type": "plan_result", "intent": intent or "unknown",
+        "title": "Khung kế hoạch sơ bộ", "ready_to_save": False,
+        "summary": "AI hiện chưa kết nối được. Đây là khung tham khảo, chưa được lưu hoặc cá nhân hóa.",
+        "missing_information": ["Cần xác nhận mục tiêu, thời gian và lịch trống"],
+        "assumptions": [], "personalization_used": [], "suggested_tasks": [],
+        "plan": [{"title": "Xác định kết quả cần đạt", "details": ["Làm rõ mục tiêu và ràng buộc."]},
+                 {"title": "Chia thành các bước", "details": ["Ước lượng thời lượng trước khi xếp lịch."]}],
+        "follow_up_question": "Bạn cần đạt kết quả gì và có thể dành thời gian khi nào?",
+        "refine_options": [],
     }
 
-
-# ── AI Schedule Today ─────────────────────────────────────────────────────────
 
 def get_ai_schedule_today(user_id: str, mode: str = "optimize") -> dict:
     """

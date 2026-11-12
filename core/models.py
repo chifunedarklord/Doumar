@@ -102,14 +102,27 @@ class Task:
         return Task(**d)
 
     @property
+    def subtask_progress(self):
+        from core.task_rules import subtask_done
+        return sum(subtask_done(item) for item in self.subtasks), len(self.subtasks)
+
+    @property
     def is_overdue(self) -> bool:
+        completed, total = self.subtask_progress
+        if total and completed == total:
+            return False
         if self.due_date and self.status not in ("done", "cancelled"):
+            if self.due_time:
+                return datetime.fromisoformat(self.due_date + 'T' + self.due_time) < datetime.now()
             return date.fromisoformat(self.due_date) < date.today()
         return False
 
     @property
     def due_date_display(self) -> str:
         from core.i18n import t as _t
+        done, total = self.subtask_progress
+        if self.status == 'done' or (total and done == total):
+            return 'Đã hoàn thành'
         if not self.due_date:
             return _t("no_due_date")
         d = date.fromisoformat(self.due_date)

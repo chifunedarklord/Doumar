@@ -94,10 +94,18 @@ def build_account_settings(page, user, navigate, on_logout):
             finish = datetime.strptime(end.value.strip(), "%H:%M")
             if begin >= finish:
                 raise ValueError("Giờ kết thúc cần sau giờ bắt đầu.")
+            profile = dict((user.settings or {}).get('planning_profile', {}))
+            profile['work_hours'] = [begin.strftime('%H:%M'), finish.strftime('%H:%M')]
             updated = replace(user, full_name=name.value.strip() or user.username,
-                              work_start=begin.strftime("%H:%M"), work_end=finish.strftime("%H:%M"))
+                              work_start=begin.strftime("%H:%M"), work_end=finish.strftime("%H:%M"),
+                              settings=dict(user.settings or {}, planning_profile=profile))
             Storage.save_user(updated)
             user.full_name, user.work_start, user.work_end = updated.full_name, updated.work_start, updated.work_end
+            user.settings = updated.settings
+            from core.services import AIMemoryService
+            AIMemoryService.remember(user.id, 'preference', 'planning_profile', profile, 1.0)
+            from utils.ai_helper import invalidate_context_cache
+            invalidate_context_cache(user.id)
             message.value = "Đã lưu cài đặt."
         except ValueError:
             message.value = "Nhập giờ HH:MM hợp lệ; giờ kết thúc phải sau giờ bắt đầu."
@@ -120,6 +128,7 @@ def build_account_settings(page, user, navigate, on_logout):
         ft.Text(' · '.join(value for value in (user.settings.get('cloud_username', user.username), user.settings.get('cloud_email', user.email)) if value), color="#666666"),
         build_sync_panel(page, user),
         name, ft.Row([start, end], wrap=True), ft.Row([ft.OutlinedButton("Lưu cài đặt", on_click=save)]),
+        ft.TextButton("Cập nhật hồ sơ và thói quen cho AI", on_click=lambda e: navigate('planning_profile')),
         ft.Divider(), build_reminder_settings(page, user),
         ft.Divider(), build_google_panel(page, user),
         ft.Divider(), ft.Text("Đổi mật khẩu", size=20, weight=ft.FontWeight.W_600), old, password, confirm_password,
@@ -299,7 +308,7 @@ def build_schedule(page, user, navigate):
             now = datetime.now()
             fixed = [item for item in Workspace.blocks(user.id, selected_day) if item["source"] != "proposal" or datetime.fromisoformat(item['start_at']) < now]
             tasks = TaskService.get_tasks(user.id)
-            ongoing_ids = {item['task_id'] for item in fixed if item.get('task_id') and datetime.fromisoformat(item['start_at']) <= now < datetime.fromisoformat(item['end_at'])}
+            ongoing_ids = {item['task_id'] for item in fixed if item.get('task_id')}
             tasks = [task for task in tasks if task.id not in ongoing_ids]
             result = propose_day(tasks, fixed, selected_day, user.work_start, user.work_end)
             accepted, rejected = result["blocks"], result["unscheduled"]

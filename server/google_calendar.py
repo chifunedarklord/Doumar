@@ -106,7 +106,7 @@ def desired_events(payload):
         if task:
             scheduled.add(task['id'])
         key = 'block:' + block['id']
-        result[key] = timed(task['title'] if task else block['title'], task.get('notes', '') if task else '', datetime.fromisoformat(block['start_at']),
+        result[key] = timed(block['title'], task.get('notes', '') if task else '', datetime.fromisoformat(block['start_at']),
             datetime.fromisoformat(block['end_at']), int(task.get('reminder_minutes', 0)) if task else 0, key)
     for task in tasks.values():
         if task['id'] in scheduled or task['status'] in ('done', 'cancelled') or not task.get('due_date'):

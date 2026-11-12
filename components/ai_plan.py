@@ -1,28 +1,32 @@
 """Readable, selectable AI suggestions. Nothing is saved without an action."""
-from datetime import datetime
 import uuid
 import flet as ft
-from core.models import Task
-from core.services import TaskService
+from core.plan_commit import save_suggestion
 from core.theme import Colors
 
 
 def build_plan(plan, page, user_id, on_changed, on_refine):
-    tasks = list(plan.get('suggested_tasks') or [])
-    saved = set()
+    raw_tasks = plan.get('suggested_tasks') or []
+    malformed = not isinstance(raw_tasks, list) or any(not isinstance(item, dict) for item in raw_tasks)
+    tasks = [item for item in raw_tasks if isinstance(item, dict)] if isinstance(raw_tasks, list) else []
+    saved = set(plan.get('_saved_indices') or [])
+    plan.setdefault('_save_id', str(uuid.uuid4()))
+    ready = not malformed and plan.get('ready_to_save') is True and not plan.get('missing_information') and not plan.get('assumptions')
     checks = []
     buttons = []
     message = ft.Text('', size=16, color=Colors.TEXT_SECONDARY)
-    bulk = ft.OutlinedButton('Lưu việc đã chọn (0)', disabled=True)
+    bulk = ft.OutlinedButton('Xác nhận lưu (0)', disabled=True)
 
     def refresh():
         count = sum(bool(box.value) for i, box in enumerate(checks) if i not in saved)
-        bulk.content = f'Lưu việc đã chọn ({count})'
-        bulk.disabled = count == 0
+        bulk.content = f'Xác nhận lưu ({count})'
+        bulk.disabled = count == 0 or not ready
         if page:
             page.update()
 
     def save(indices):
+        if not ready:
+            return
         count = 0
         errors = 0
         for i in indices:
@@ -30,26 +34,19 @@ def build_plan(plan, page, user_id, on_changed, on_refine):
                 continue
             item = tasks[i]
             try:
-                now = datetime.now().isoformat()
-                TaskService.save_task(Task(
-                    id=str(uuid.uuid4()), user_id=user_id,
-                    title=item.get('title') or 'Công việc mới',
-                    description=item.get('description', ''),
-                    category=item.get('category', 'personal'),
-                    priority=item.get('priority', 'medium'), status='todo',
-                    due_date=item.get('due_date'), due_time=item.get('due_time'),
-                    estimated_minutes=int(item.get('estimated_minutes') or 30),
-                    created_at=now, updated_at=now))
+                save_suggestion(user_id, item, f"{plan['_save_id']}:{i}")
                 saved.add(i)
                 checks[i].value = False
                 checks[i].disabled = True
                 buttons[i].content = 'Đã lưu'
                 buttons[i].disabled = True
                 count += 1
-            except Exception:
+            except Exception as exc:
                 errors += 1
-        plan['suggested_tasks'] = [item for i, item in enumerate(tasks) if i not in saved]
-        message.value = f'Đã lưu {count} công việc.' + (f' {errors} việc chưa lưu được; hãy thử lại.' if errors else '')
+                message.value = str(exc)
+        # Preserve stable suggestion positions and IDs across re-renders.
+        plan['_saved_indices'] = sorted(saved)
+        message.value = f'Đã lưu {count} công việc.' + (f' {errors} việc chưa lưu được: ' + message.value if errors else '')
         if count and on_changed:
             on_changed()
         refresh()
@@ -65,6 +62,8 @@ def build_plan(plan, page, user_id, on_changed, on_refine):
     for index, step in enumerate(plan.get('plan') or []):
         if isinstance(step, dict):
             title = step.get('title') or step.get('name') or f'Bước {index + 1}'
+            if step.get('time_or_step'):
+                title = str(step['time_or_step']) + ' · ' + title
             details = step.get('details') or step.get('actions') or step.get('description') or []
             if isinstance(details, str):
                 details = [details]
@@ -79,19 +78,32 @@ def build_plan(plan, page, user_id, on_changed, on_refine):
     if tasks:
         sections.extend([ft.Divider(color=Colors.BORDER), ft.Text('Công việc đề xuất', size=18, weight=ft.FontWeight.W_600)])
     for i, item in enumerate(tasks):
-        box = ft.Checkbox(value=False, on_change=lambda _: refresh(),
+        box = ft.Checkbox(value=False, disabled=not ready or i in saved, on_change=lambda _: refresh(),
                           tooltip='Chọn công việc để lưu',
                           fill_color={ft.ControlState.SELECTED: '#111111', ft.ControlState.DEFAULT: '#FFFFFF'},
                           check_color='#FFFFFF', border_side=ft.BorderSide(1.2, '#777777'))
-        button = ft.TextButton('Lưu', on_click=lambda _, index=i: save([index]))
+        button = ft.TextButton('Đã lưu' if i in saved else 'Xác nhận lưu', disabled=not ready or i in saved, on_click=lambda _, index=i: save([index]))
         checks.append(box)
         buttons.append(button)
         sections.append(ft.Row([box, ft.Column([
             ft.Text(item.get('title', ''), size=17),
-            ft.Text(f"{item.get('estimated_minutes') or 30} phút", size=14, color=Colors.TEXT_SECONDARY),
+            ft.Text(f"{item.get('estimated_minutes') or 30} phút dự kiến · " +
+                    (f"{item['start_at']} → {item.get('end_at') or 'theo thời lượng'}" if item.get('start_at') else ('Theo lịch các việc nhỏ' if any(sub.get('start_at') for sub in item.get('subtasks') or []) else 'Chưa xếp giờ · chỉ vào công việc')) +
+                    (f" · Hạn: {item['due_date']} {item.get('due_time') or ''}" if item.get('due_date') else ''), size=14, color=Colors.TEXT_SECONDARY),
+            *[ft.Text(f"{j+1}. {sub.get('title', '')}" + (f" · {sub['start_at']} → {sub.get('end_at') or 'theo thời lượng'}" if sub.get('start_at') else ''), size=14, color=Colors.TEXT_SECONDARY)
+              for j, sub in enumerate(item.get('subtasks') or [])],
         ], spacing=3, expand=True), button], spacing=8))
     if tasks:
-        sections.extend([bulk, message])
+        def select_all(e):
+            for i, box in enumerate(checks):
+                if ready and i not in saved:
+                    box.value = e.control.value
+            refresh()
+        sections.extend([ft.Checkbox(label='Chọn tất cả', disabled=not ready, on_change=select_all), bulk, message])
+    if not ready:
+        sections.append(ft.Text('Bản sơ bộ — hãy trả lời câu hỏi hoặc yêu cầu điều chỉnh trước khi xác nhận lưu.', size=15, color=Colors.TEXT_SECONDARY))
+    for missing in plan.get('missing_information') or []:
+        sections.append(ft.Text('Cần làm rõ: ' + str(missing), size=15))
     if plan.get('follow_up_question'):
         sections.append(ft.Text(plan['follow_up_question'], size=16, color=Colors.TEXT_SECONDARY))
     options = plan.get('refine_options') or []

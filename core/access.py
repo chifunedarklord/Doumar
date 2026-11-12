@@ -1,4 +1,4 @@
-"""Free/Plus/Pro feature policy; paid status never comes from local user settings."""
+"""Server subscriptions and explicit local installation-owner grants."""
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import time
@@ -43,6 +43,10 @@ class Access:
 
 def access_for(account_id, refresh=False):
     client = BillingClient()
+    if not client.base_url:
+        from core.admin import is_local_admin
+        if is_local_admin(account_id):
+            return Access('pro', 'owner')
     if not client.configured:
         return Access()
     key = (account_id, client.base_url, hashlib.sha256(client.token.encode()).hexdigest())

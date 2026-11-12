@@ -22,9 +22,10 @@ def palette(page):
 def build_tasks(page, user, navigate, register_refresh=None, project_id=None):
     c = palette(page)
     rows = ft.Column(spacing=0)
-    state = {"filter": "active" if project_id else "today", "query": "", "priority": "all", "sort": "due", "project": project_id or "all"}
+    state = {"filter": "active", "query": "", "priority": "all", "sort": "due", "project": project_id or "all"}
     count = ft.Text(color=c["muted"], size=13)
     error = ft.Text(color=c["text"], size=13, visible=False)
+    focus_area = ft.Column(spacing=0)
 
     def remove(task):
         def confirm(_):
@@ -63,20 +64,13 @@ def build_tasks(page, user, navigate, register_refresh=None, project_id=None):
         dialog.open = True
         page.update()
 
-    def complete(task):
-        try:
-            TaskService.toggle_done(replace(task))
-            error.visible = False
-        except Exception:
-            error.value = "Không cập nhật được trạng thái. Vui lòng thử lại."
-            error.visible = True
-        refresh()
-
     def refresh(update=True):
         tasks = TaskService.get_tasks(user.id)
+        from screens.task_folder_screen import build_focus_panel
+        focus_area.controls = [build_focus_panel(page, user, navigate, refresh, compact=True)]
         q = state["query"].casefold()
         today = date.today().isoformat()
-        tasks = [task for task in tasks if q in (task.title + " " + (task.description or "") + " " + " ".join(task.tags)).casefold()]
+        tasks = [task for task in tasks if q in (task.title + " " + (task.description or "") + " " + " ".join(task.tags) + " " + " ".join(child.get('title','') for child in task.subtasks)).casefold()]
         selected = state["filter"]
         if selected == "active":
             tasks = [task for task in tasks if task.status not in ("done", "cancelled")]
@@ -96,7 +90,7 @@ def build_tasks(page, user, navigate, register_refresh=None, project_id=None):
         priorities = {"high": 0, "medium": 1, "low": 2}
         key = (lambda task: (task.status == "done", priorities.get(task.priority, 1), task.due_date or "9999")) if state["sort"] == "priority" else (lambda task: (task.status == "done", task.due_date or "9999", task.due_time or '23:59', priorities.get(task.priority, 1), task.title.casefold()))
         tasks.sort(key=key)
-        count.value = f"{len(tasks)} công việc"
+        count.value = f"{len(tasks)} thư mục"
         rows.controls.clear()
         for task in tasks:
             label = {"high": "Cao", "medium": "Vừa", "low": "Thấp"}.get(task.priority, task.priority)
@@ -104,13 +98,12 @@ def build_tasks(page, user, navigate, register_refresh=None, project_id=None):
                 padding=ft.Padding.symmetric(vertical=3),
                 border=ft.Border(bottom=ft.BorderSide(1, c["line"])),
                 content=ft.Row([
-                    ft.Checkbox(value=task.status == "done", tooltip="Đánh dấu hoàn thành", check_color=c["text"], fill_color=c["bg"],
-                                on_change=lambda e, task=task: complete(task)),
-                    ft.Container(expand=True, on_click=lambda e, task=task: navigate("task_edit", task=task),
-                                 content=ft.Text(task.title, color=c["muted"] if task.status == "done" else c["text"],
+                    ft.IconButton(icon=ft.Icons.FOLDER_OUTLINED, tooltip="Mở thư mục công việc", on_click=lambda e, task=task: navigate('task_folder', task_id=task.id)),
+                    ft.Container(expand=True, on_click=lambda e, task=task: navigate("task_folder", task_id=task.id),
+                                 content=ft.Text(task.title + (f" · {task.subtask_progress[0]}/{task.subtask_progress[1]}" if task.subtasks else ""), color=c["muted"] if task.status == "done" else c["text"],
                                                  style=ft.TextStyle(decoration=ft.TextDecoration.LINE_THROUGH if task.status == "done" else None),
                                                  size=14, max_lines=2, tooltip=task.title, overflow=ft.TextOverflow.ELLIPSIS)),
-                    ft.Text(("Quá hạn · " + date.fromisoformat(task.due_date).strftime("%d/%m" if date.fromisoformat(task.due_date).year == date.today().year else "%d/%m/%Y") if task.is_overdue else task.due_date_display) if task.due_date else "—", width=108, size=12,
+                    ft.Text(("Quá hạn · " + date.fromisoformat(task.due_date).strftime("%d/%m" if date.fromisoformat(task.due_date).year == date.today().year else "%d/%m/%Y") if task.is_overdue else task.due_date_display) if task.due_date or task.status == "done" else "—", width=108, size=12,
                             weight=ft.FontWeight.W_600 if task.is_overdue else ft.FontWeight.W_400,
                             color=c["text"] if task.is_overdue else c["muted"]),
                     ft.Text(label, width=70, size=12, color=c["muted"]),
@@ -125,7 +118,7 @@ def build_tasks(page, user, navigate, register_refresh=None, project_id=None):
             rows.controls.append(ft.Container(padding=ft.Padding.symmetric(vertical=48, horizontal=16), content=ft.Column([
                 ft.Text("Không có công việc phù hợp" if q else "Một khoảng trống cho việc tiếp theo", size=18, color=c["text"]),
                 ft.Text("Thử bộ lọc khác hoặc thêm công việc mới.", color=c["muted"]),
-                ft.TextButton("Thêm công việc", on_click=lambda e: navigate("task_edit")),
+                ft.TextButton("Thêm thư mục", on_click=lambda e: navigate("task_edit")),
             ], spacing=12)))
         if update:
             page.update()
@@ -136,7 +129,15 @@ def build_tasks(page, user, navigate, register_refresh=None, project_id=None):
 
     def duplicate(task):
         now = datetime.now().isoformat()
-        navigate("task_edit", task=replace(task, id=str(uuid.uuid4()), title=task.title + " (bản sao)",
+        from copy import deepcopy
+        children = deepcopy(task.subtasks)
+        for child in children:
+            child['status'] = 'todo'
+            child['done'] = False
+            child['id'] = str(uuid.uuid4())
+            child.pop('start_at', None)
+            child.pop('end_at', None)
+        navigate("task_edit", task=replace(task, id=str(uuid.uuid4()), title=task.title + " (bản sao)", subtasks=children,
                   status="todo", completed_at=None, created_at=now, updated_at=now))
 
     def change_option(e, name):
@@ -147,7 +148,7 @@ def build_tasks(page, user, navigate, register_refresh=None, project_id=None):
         state["filter"] = e.control.value
         refresh()
 
-    quick = ft.TextField(hint_text='Thêm việc hôm nay rồi nhấn Enter', text_size=14, expand=True, tooltip='Ctrl+K: thêm nhanh · Ctrl+N: mở trang thêm công việc')
+    quick = ft.TextField(hint_text='Thêm thư mục công việc rồi nhấn Enter', text_size=14, expand=True, tooltip='Ctrl+K: thêm nhanh · Ctrl+N: mở trang thêm công việc')
     def quick_add(_):
         if not quick.value or not quick.value.strip():
             return
@@ -156,13 +157,19 @@ def build_tasks(page, user, navigate, register_refresh=None, project_id=None):
             page.update()
             return
         try:
-            TaskService.save_task(Task(id=str(uuid.uuid4()), user_id=user.id, title=quick.value.strip(), due_date=date.today().isoformat()))
+            TaskService.save_task(Task(id=str(uuid.uuid4()), user_id=user.id, title=quick.value.strip()))
             quick.value = ''
-            error.value, error.visible = 'Đã lưu công việc.', True
+            quick_button.disabled = True
+            error.value, error.visible = 'Đã thêm thư mục. Bấm tên thư mục để thêm các việc nhỏ.', True
             refresh()
         except Exception:
             error.value, error.visible = 'Không lưu được. Nội dung vẫn được giữ để thử lại.', True
             page.update()
+    quick_button = ft.OutlinedButton('Thêm nhanh', icon=ft.Icons.ADD, disabled=True, on_click=quick_add)
+    def quick_changed(e):
+        quick_button.disabled = not bool((e.control.value or '').strip())
+        page.update()
+    quick.on_change = quick_changed
     quick.on_submit = quick_add
     async def keyboard(e):
         if e.ctrl and str(e.key).lower() == 'n':
@@ -175,21 +182,21 @@ def build_tasks(page, user, navigate, register_refresh=None, project_id=None):
         register_refresh(refresh)
     refresh(update=False)
     projects = ProjectService.get_projects(user.id)
-    return ft.Column([
-        ft.Text("Công việc" if project_id else "Hôm nay", size=30, weight=ft.FontWeight.W_600, color=c["text"]),
+    return ft.ListView([
+        ft.Text("Công việc", size=30, weight=ft.FontWeight.W_600, color=c["text"]),
+        ft.Text("Mở một thư mục để xem các việc nhỏ, hoàn thành hoặc chọn mục tiêu tập trung.", size=14, color=c['muted']),
         count,
-        ft.Row([quick, ft.IconButton(icon=ft.Icons.ADD, tooltip='Thêm nhanh', on_click=quick_add)]),
-        ft.Container(height=8),
+        focus_area,
         ft.Row([
-                ft.OutlinedButton("Thêm công việc", icon=ft.Icons.ADD, on_click=lambda e: navigate("task_edit")),
-                ft.Container(expand=True),
-                ft.IconButton(icon=ft.Icons.REFRESH, tooltip="Cập nhật danh sách", on_click=lambda e: refresh()),
-                ft.PopupMenuButton(icon=ft.Icons.MORE_HORIZ, tooltip="Công cụ công việc", items=[
-                    ft.PopupMenuItem(content=ft.Text("Lịch"), on_click=lambda e: navigate("calendar")),
-                    ft.PopupMenuItem(content=ft.Text("Dự án"), on_click=lambda e: navigate("projects")),
-                    ft.PopupMenuItem(content=ft.Text("Thùng rác"), on_click=lambda e: navigate("trash")),
-                ]),
-        ], spacing=4),
+            ft.FilledButton("Thêm thư mục", icon=ft.Icons.CREATE_NEW_FOLDER_OUTLINED,
+                            on_click=lambda e: navigate("task_edit"),
+                            style=ft.ButtonStyle(bgcolor=c['text'], color=c['bg'])),
+            ft.TextButton("Lịch", icon=ft.Icons.CALENDAR_TODAY_OUTLINED, on_click=lambda e: navigate("calendar")),
+            ft.TextButton("Dự án", icon=ft.Icons.FOLDER_SPECIAL_OUTLINED, on_click=lambda e: navigate("projects")),
+            ft.TextButton("Thùng rác", icon=ft.Icons.DELETE_OUTLINE, on_click=lambda e: navigate("trash")),
+            ft.TextButton("Làm mới", icon=ft.Icons.REFRESH, on_click=lambda e: refresh()),
+        ], spacing=8, run_spacing=8, wrap=True),
+        ft.Row([quick, quick_button], spacing=10),
         ft.Row([
             ft.Dropdown(value=state['filter'], width=200, text_size=13, dense=True, border_color=c["line"], border_radius=6, on_select=select, options=[
                 ft.DropdownOption("active", "Đang thực hiện"), ft.DropdownOption("today", "Hôm nay"),
@@ -210,11 +217,11 @@ def build_tasks(page, user, navigate, register_refresh=None, project_id=None):
                 on_select=lambda e: change_option(e, "sort")),
         ], wrap=True),
         ft.Container(height=4),
-        ft.Row([ft.Container(width=48), ft.Text("Tên công việc", expand=True, size=12, color=c["muted"]),
+        ft.Row([ft.Container(width=48), ft.Text("Thư mục công việc", expand=True, size=12, color=c["muted"]),
                 ft.Text("Hạn", width=108, size=12, color=c["muted"]),
                 ft.Text("Ưu tiên", width=70, size=12, color=c["muted"]), ft.Container(width=48)], spacing=8),
         ft.Divider(height=1, color=c["line"]),
-        ft.ListView(controls=[rows], expand=True),
+        rows,
         error,
     ], expand=True, spacing=12)
 
@@ -266,7 +273,20 @@ def build_editor(page, user, navigate, task=None, register_guard=None):
 
     def render_subtasks():
         subtask_view.controls = []
-        for item in subtask_data:
+        from core.task_rules import subtask_done
+        for index, item in enumerate(subtask_data):
+            def move(e, item=item, offset=0):
+                position = subtask_data.index(item)
+                target = position + offset
+                if 0 <= target < len(subtask_data):
+                    subtask_data[position], subtask_data[target] = subtask_data[target], subtask_data[position]
+                    render_subtasks()
+                    page.update()
+            def edit(e, item=item, key="title"):
+                item[key] = e.control.value.strip() or None
+            def number(e, item=item):
+                value = e.control.value.strip()
+                item['estimated_minutes'] = int(value) if value.isdigit() else value or None
             def toggle(e, item=item):
                 item["status"] = "done" if e.control.value else "todo"
                 if "done" in item:
@@ -275,11 +295,37 @@ def build_editor(page, user, navigate, task=None, register_guard=None):
                 subtask_data.remove(item)
                 render_subtasks()
                 page.update()
-            subtask_view.controls.append(ft.Row([
-                ft.Checkbox(value=item.get("status") == "done" or bool(item.get("done")), on_change=toggle),
-                ft.Text(item.get("title", ""), expand=True),
+            def dropped(e, item=item):
+                source = e.src.data
+                if source is item or source not in subtask_data:
+                    return
+                target = subtask_data.index(item)
+                subtask_data.remove(source)
+                subtask_data.insert(target, source)
+                render_subtasks()
+                page.update()
+            row = ft.Row([
+                ft.Draggable(content=ft.Icon(ft.Icons.DRAG_HANDLE, size=18, color=c['muted']),
+                             group='subtask-priority', data=item, tooltip='Kéo để đổi thứ tự ưu tiên'),
+                ft.Checkbox(value=subtask_done(item), on_change=toggle),
+                ft.Column([
+                    *([ft.Text("Lịch thực hiện: " + str(item.get('start_at')) + " → " + str(item.get('end_at') or 'theo thời lượng'), size=12, color=c['muted'])] if item.get('start_at') else []),
+                    ft.TextField(value=item.get("title", ""), label="Việc nhỏ", on_change=lambda e, item=item: edit(e, item), text_size=13),
+                    ft.Row([
+                        ft.TextField(value=str(item.get("estimated_minutes") or ""), label="Phút dự kiến", expand=True, on_change=lambda e, item=item: number(e, item), text_size=12),
+                        ft.TextField(value=item.get("due_date") or "", label="Hạn riêng", hint_text="YYYY-MM-DD", expand=True,
+                                     on_change=lambda e, item=item: edit(e, item, 'due_date'), text_size=12),
+                        ft.TextField(value=item.get("due_time") or "", label="Giờ hạn", hint_text="HH:MM", width=115,
+                                     on_change=lambda e, item=item: edit(e, item, 'due_time'), text_size=12),
+                    ]),
+                ], expand=True, spacing=4, horizontal_alignment=ft.CrossAxisAlignment.STRETCH),
+                ft.IconButton(icon=ft.Icons.ARROW_UPWARD, tooltip="Ưu tiên trước", disabled=index == 0,
+                              on_click=lambda e, item=item: move(e, item, -1)),
+                ft.IconButton(icon=ft.Icons.ARROW_DOWNWARD, tooltip="Ưu tiên sau", disabled=index == len(subtask_data)-1,
+                              on_click=lambda e, item=item: move(e, item, 1)),
                 ft.IconButton(icon=ft.Icons.CLOSE, tooltip="Bỏ việc con", on_click=remove),
-            ]))
+            ])
+            subtask_view.controls.append(ft.DragTarget(content=row, group='subtask-priority', on_accept=dropped))
 
     def add_subtask(_):
         if new_subtask.value and new_subtask.value.strip():
@@ -365,6 +411,9 @@ def build_editor(page, user, navigate, task=None, register_guard=None):
         ft.Row([ft.TextButton("Công việc", icon=ft.Icons.ARROW_BACK, on_click=lambda e: navigate("tasks"))]),
         ft.Text("Sửa công việc" if task else "Thêm công việc", size=30, color=c["text"], weight=ft.FontWeight.W_600),
         ft.Container(height=12), title, description,
+        ft.Text("Việc nhỏ · theo thứ tự ưu tiên", size=18, weight=ft.FontWeight.W_600),
+        ft.Text("Kéo tay nắm hoặc dùng mũi tên để đổi thứ tự. Để trống hạn riêng để dùng hạn công việc cha. Hoàn thành hết các bước sẽ tự hoàn thành công việc.", size=12, color=c['muted']),
+        subtask_view, ft.Row([new_subtask, ft.IconButton(icon=ft.Icons.ADD, tooltip="Thêm việc con", on_click=add_subtask)]),
         ft.ResponsiveRow([ft.Container(due, col=8), ft.Container(due_time, col=4)]),
         ft.ResponsiveRow([ft.Container(ft.Column([priority], horizontal_alignment=ft.CrossAxisAlignment.STRETCH), col=6), ft.Container(ft.Column([status], horizontal_alignment=ft.CrossAxisAlignment.STRETCH), col=6)]),
         ft.ResponsiveRow([ft.Container(project, col=6), ft.Container(category, col=6)]),
@@ -372,8 +421,6 @@ def build_editor(page, user, navigate, task=None, register_guard=None):
         ft.Text("Bật nhắc nền trong Cài đặt để nhận nhắc việc sau khi đóng cửa sổ.", size=12, color=c["muted"]),
         tags,
         repeat,
-        ft.Text("Việc con", size=18, weight=ft.FontWeight.W_600),
-        subtask_view, ft.Row([new_subtask, ft.IconButton(icon=ft.Icons.ADD, tooltip="Thêm việc con", on_click=add_subtask)]),
         notes, error,
         ft.Row([ft.OutlinedButton("Lưu công việc", icon=ft.Icons.CHECK, on_click=save), ft.TextButton("Hủy", on_click=lambda e: navigate("tasks"))]),
     ], spacing=18, scroll=ft.ScrollMode.AUTO, expand=True, width=760,

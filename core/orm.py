@@ -264,6 +264,13 @@ class ProductivityLogModel(Base):
     focus_time_minutes: Mapped[int] = mapped_column(Integer, default=0)
     completed_tasks_count: Mapped[int] = mapped_column(Integer, default=0)
 
+class LocalAdminModel(Base):
+    """Explicit installation-owner grant; excluded from account imports/sync."""
+    __tablename__ = "local_admins"
+    user_id: Mapped[str] = mapped_column(Unicode(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    granted_at: Mapped[str] = mapped_column(Unicode(50))
+
+
 class ScheduleBlockModel(Base):
     __tablename__ = "schedule_blocks"
     id: Mapped[str] = mapped_column(Unicode(36), primary_key=True)

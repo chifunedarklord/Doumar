@@ -129,6 +129,8 @@ def main(page: ft.Page):
         from screens.workspace_screen import build_schedule, build_plans, build_data, build_trash, build_projects, build_account_settings
         from screens.upgrade_screen import build_upgrade, build_checkout, build_locked
         from core.access import access_for
+        from screens.onboarding_screen import build_onboarding_screen
+        from screens.task_folder_screen import build_task_folder
         builders = {
             "tasks":     lambda: build_tasks(page, user, navigate, register_refresh=lambda callback: tasks_refresh.update(callback=callback), project_id=kwargs.get("project_id")),
             "calendar":  lambda: build_schedule(page, user, navigate),
@@ -136,6 +138,8 @@ def main(page: ft.Page):
             "profile":   lambda: build_account_settings(page, user, navigate, logout_user),
             "ai":        build_chat_page,
             "settings":  lambda: build_account_settings(page, user, navigate, logout_user),
+            "planning_profile": lambda: build_onboarding_screen(page, user, lambda: navigate('settings')),
+            "task_folder": lambda: build_task_folder(page, user, navigate, kwargs.get('task_id')),
             "task_edit": lambda: build_editor(page, user, navigate, kwargs.get("task"), register_guard=lambda callback: navigation_guard.update(callback=callback)),
             "projects":  lambda: build_projects(page, user, navigate),
             "plans":     lambda: build_upgrade(page, user, navigate),
@@ -207,7 +211,7 @@ def main(page: ft.Page):
         from screens.desktop_screen import palette
         c = palette(page)
         def item(label, icon, route):
-            selected = active_tab["t"] == route or (route == "tasks" and active_tab["t"] in ("projects", "task_edit", "trash")) or (route == "plans" and active_tab["t"] == "checkout")
+            selected = active_tab["t"] == route or (route == "tasks" and active_tab["t"] in ("projects", "task_folder", "task_edit", "trash")) or (route == "plans" and active_tab["t"] == "checkout")
             return ft.Container(
                 content=ft.Row([ft.Icon(icon, size=18, color=c["text"]), ft.Text(label, size=16, color=c["text"], weight=ft.FontWeight.W_600 if selected else ft.FontWeight.W_400, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, expand=True)], spacing=10),
                 padding=ft.Padding.symmetric(horizontal=12, vertical=10), border_radius=5,
@@ -245,6 +249,10 @@ def main(page: ft.Page):
         ], spacing=0, expand=True, vertical_alignment=ft.CrossAxisAlignment.STRETCH)
 
     def show_main_app():
+        from core.services import AIMemoryService
+        if not AIMemoryService.recall_value(current_user['u'].id, 'system', 'onboarding_done') and AIMemoryService.recall_value(current_user['u'].id, 'preference', 'planning_profile') is None:
+            show_onboarding(current_user['u'])
+            return
         if current_user['u'].settings.get('background_reminders', False):
             from core.reminders import start_agent
             start_agent()

@@ -3,6 +3,7 @@ TaskFlow - Services Layer (Upgraded)
 Tích hợp toàn bộ intelligence engines vào business logic.
 """
 import logging
+import re
 import bcrypt
 import uuid
 from datetime import datetime, date
@@ -19,11 +20,15 @@ logger = logging.getLogger(__name__)
 class AuthService:
     @staticmethod
     def hash_password(password: str) -> str:
+        if not isinstance(password, str) or len(password.encode('utf-8')) > 72:
+            raise ValueError("Mật khẩu không được vượt 72 byte UTF-8.")
         salt = bcrypt.gensalt()
         return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
 
     @staticmethod
     def verify_password(password: str, hashed: str) -> bool:
+        if not isinstance(password, str) or not isinstance(hashed, str):
+            return False
         try:
             return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
         except ValueError:
@@ -40,6 +45,13 @@ class AuthService:
                 return True, result['message']
             except CloudError as exc:
                 return False, str(exc)
+        if not isinstance(username, str) or not username.strip() or len(username.strip()) > 40:
+            return False, "Tên đăng nhập cần từ 1 đến 40 ký tự."
+        if not isinstance(email, str) or len(email.strip()) > 254 or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email.strip()):
+            return False, "Email chưa hợp lệ."
+        if not isinstance(password, str) or len(password.encode('utf-8')) > 72:
+            return False, "Mật khẩu không được vượt 72 byte UTF-8."
+        username, email = username.strip(), email.strip().casefold()
         if Storage.find_user(username=username):
             return False, "Tên đăng nhập đã tồn tại"
         if Storage.find_user(email=email):
@@ -152,6 +164,8 @@ class AuthService:
             return False, "Mật khẩu cũ không đúng!"
         if new_password != confirm_password:
             return False, "Mật khẩu mới không khớp!"
+        if not isinstance(new_password, str) or len(new_password.encode('utf-8')) > 72:
+            return False, "Mật khẩu không được vượt 72 byte UTF-8."
         if len(new_password) < 6:
             return False, "Mật khẩu tối thiểu 6 ký tự!"
         from dataclasses import replace
@@ -196,6 +210,7 @@ class TaskService:
 
     @staticmethod
     def save_task(task: Task, expected_revision=None):
+        previous_task = next((item for item in Storage.get_tasks(task.user_id) if item.id == task.id), None)
         if task.is_recurring:
             existing = next((item for item in Storage.get_tasks(task.user_id) if item.id == task.id), None)
             if existing is None or not existing.is_recurring or existing.recur_pattern != task.recur_pattern:
@@ -234,6 +249,14 @@ class TaskService:
             logger.exception("AdaptivePriorityEngine failed for task %s", task.id)
 
         is_new = Storage.save_task(task, expected_revision=expected_revision)
+        if task.status == 'done' and (previous_task is None or previous_task.status != 'done'):
+            try:
+                BehaviorService.log(task.user_id, 'task_complete', {
+                    'task_id': task.id, 'title': task.title, 'category': task.category,
+                    'priority': task.priority, 'estimated_minutes': task.estimated_minutes,
+                    'via': 'subtasks' if task.subtasks else 'editor'})
+            except Exception:
+                logger.exception('Saved completion; behavior log failed')
 
         # Log task creation behavior so AI can learn from it
         if is_new:
@@ -286,6 +309,10 @@ class TaskService:
         revision = task.updated_at
         was_done = task.status == "done"
         task.status = "done" if not was_done else "todo"
+        for item in task.subtasks:
+            item['status'] = task.status
+            if 'done' in item:
+                item['done'] = not was_done
         task.completed_at = datetime.now().isoformat() if task.status == 'done' else None
         Storage.save_task(task, expected_revision=revision)
         if task.status == "done":

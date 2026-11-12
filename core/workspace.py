@@ -16,28 +16,7 @@ def _id(user_id, kind, original):
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"taskflow-restore:{user_id}:{kind}:{original}"))
 
 
-def validate_task(task):
-    if not isinstance(task.title, str) or not task.title.strip() or len(task.title) > 500:
-        raise ValueError("Tên công việc cần từ 1 đến 500 ký tự.")
-    if task.status not in ("todo", "in_progress", "done", "cancelled"):
-        raise ValueError("Trạng thái công việc không hợp lệ.")
-    if task.priority not in ("low", "medium", "high"):
-        raise ValueError("Mức ưu tiên không hợp lệ.")
-    for value in (task.due_date, task.start_date):
-        if value:
-            date.fromisoformat(value)
-    if task.due_time:
-        datetime.strptime(task.due_time, "%H:%M")
-    if type(task.estimated_minutes) is not int or not 1 <= task.estimated_minutes <= 10080:
-        raise ValueError("Thời lượng cần từ 1 đến 10080 phút.")
-    if type(task.reminder_minutes) is not int or task.reminder_minutes < 0:
-        raise ValueError("Thời gian nhắc việc không hợp lệ.")
-    if not isinstance(task.tags, list) or len(task.tags) > 100 or any(not isinstance(tag, str) for tag in task.tags):
-        raise ValueError("Nhãn công việc không hợp lệ.")
-    if not isinstance(task.subtasks, list) or len(task.subtasks) > 200 or any(not isinstance(item, dict) or not isinstance(item.get("title"), str) for item in task.subtasks):
-        raise ValueError("Danh sách việc con không hợp lệ.")
-    if task.is_recurring and task.recur_pattern not in ("daily", "weekly", "monthly"):
-        raise ValueError("Chu kỳ lặp không hợp lệ.")
+from core.task_validation import validate_task
 
 
 class Workspace:

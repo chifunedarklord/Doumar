@@ -806,7 +806,7 @@ def build_ai_screen(page: ft.Page, user, on_navigate, compact=False, on_close=No
             # Gửi cho AI
             from core.ai_planner_service import detect_plan_intent
             intent = detect_plan_intent(recognized)
-            if intent:
+            if intent or _state.get("last_plan"):
                 _run_plan_reply(recognized, last_plan=_state.get("last_plan"), feature='ai_voice')
             else:
                 _run_text_reply(recognized)
@@ -1082,8 +1082,11 @@ def build_ai_screen(page: ft.Page, user, on_navigate, compact=False, on_close=No
                 from core.ai_planner_service import get_plan_response
                 lang_instr = ai_lang_instruction()
                 full_msg = f"{lang_instr}\n{message}".strip() if lang_instr else message
+                session = ChatService.get_session(user.id, _state['session_id']) if _state['session_id'] else None
+                import json
+                history = json.dumps((session or {}).get('messages', [])[-20:], ensure_ascii=False)[-20000:]
                 result = get_plan_response(full_msg, user.id, last_plan=last_plan,
-                                           image_path=image_path, feature=feature)
+                                           image_path=image_path, feature=feature, history=history)
             except Exception as _exc:
                 logger.exception("_run_plan_reply failed")
                 result = {"type": "normal_chat",
@@ -1108,7 +1111,14 @@ def build_ai_screen(page: ft.Page, user, on_navigate, compact=False, on_close=No
                            f"Ưu tiên: {result.get('priority', 'medium')} | "
                            f"Hạn: {result.get('due_date') or 'chưa đặt'}")
                     _add_to_chat(_bubble(msg, is_user=False))
-                    _show_task_create_confirm(result)
+                    result = dict(result)
+                    result.setdefault('start_at', None)
+                    task_plan = {'type': 'plan_result', 'title': 'Công việc đề xuất',
+                                 'ready_to_save': result.get('ready_to_save') is True,
+                                 'suggested_tasks': [result], 'missing_information': result.get('missing_information') or [],
+                                 'follow_up_question': result.get('follow_up_question', '')}
+                    _state['last_plan'] = task_plan
+                    _add_to_chat(_plan_row(task_plan))
                     if _state["session_id"]:
                         ChatService.add_message(user.id, _state["session_id"], "model", msg)
 
@@ -1208,14 +1218,8 @@ def build_ai_screen(page: ft.Page, user, on_navigate, compact=False, on_close=No
         _load_sessions_ui()
         page.update()
 
-        # Route to planner or normal chat
-        from core.ai_planner_service import detect_plan_intent
-        if not image_path and text:
-            intent = detect_plan_intent(text)
-            if intent:
-                _run_plan_reply(text, last_plan=_state.get("last_plan"))
-                return
-        _run_text_reply(text, image_path)
+        # One structured conversation handles drafts, clarification and final plans.
+        _run_plan_reply(text, last_plan=_state.get("last_plan"), image_path=image_path)
 
     # ── Inline task creation button ─────────────────────────────
     def _show_inline_task_btn(task_data: dict):
@@ -1972,9 +1976,9 @@ def build_ai_screen(page: ft.Page, user, on_navigate, compact=False, on_close=No
                         color=Colors.TEXT_PRIMARY, weight=Typography.BOLD),
                 ft.Row([
                     ft.Container(width=7, height=7, border_radius=4,
-                                 bgcolor=Colors.SUCCESS),
-                    ft.Text(t("ai_active"), size=Typography.TINY,
-                            color=Colors.SUCCESS),
+                                 bgcolor=Colors.SUCCESS if _has_api_key else Colors.TEXT_MUTED),
+                    ft.Text(t("ai_ready") if _has_api_key else t("ai_unconfigured"), size=Typography.TINY,
+                            color=Colors.SUCCESS if _has_api_key else Colors.TEXT_MUTED),
                 ], spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ], spacing=2, tight=True),
             ft.Container(expand=True),

@@ -66,7 +66,7 @@ _STEPS = [
     },
     {
         "key": "main_goal",
-        "question": "Mục tiêu chính khi dùng TaskFlow?",
+        "question": "Mục tiêu chính khi dùng Doumar?",
         "icon": "🎯",
         "options": [
             {"label": "Năng suất công việc", "value": "work",     "desc": "Hoàn thành nhiều việc hơn"},
@@ -97,6 +97,9 @@ _STEPS = [
     },
 ]
 
+_STEP_ORDER = ['main_goal', 'role', 'work_style', 'peak_time', 'focus_duration', 'sleep_schedule', 'daily_workload', 'stress_tolerance']
+_STEPS.sort(key=lambda step: _STEP_ORDER.index(step['key']))
+
 _SLEEP_MAP = {
     "early":  ("21:30", "05:30"),
     "normal": ("23:00", "07:00"),
@@ -119,66 +122,28 @@ _WORKLOAD_MAP = {
 def survey_to_ai_memory(user_id: str, answers: dict):
     """Chuyển survey answers thành AIMemory entries và cập nhật User model."""
     import json
-
-    def remember(key, value, confidence=0.6):
-        AIMemoryService.remember(user_id, "preference", key, value, confidence)
-
-    # Work style
-    ws = answers.get("work_style", "balanced")
-    remember("work_style", ws)
-
-    # Peak hours
-    pt = answers.get("peak_time", "morning")
-    peak_hours = _PEAK_HOUR_MAP.get(pt, [9, 10, 14, 15])
-    remember("peak_hours", peak_hours)
-
-    # Focus duration
-    fd = answers.get("focus_duration", 45)
-    remember("preferred_focus_duration", fd)
-
-    # Stress tolerance
-    st = answers.get("stress_tolerance", "medium")
-    remember("stress_tolerance", st)
-
-    # Role
-    remember("role", answers.get("role", "other"))
-
-    # Main goal
-    remember("main_goal", answers.get("main_goal", "mixed"))
-
-    # Daily workload preference
-    remember("daily_workload", answers.get("daily_workload", "moderate"))
-
-    # Sleep schedule
-    sleep_key = answers.get("sleep_schedule", "normal")
-    sleep_time, wake_time = _SLEEP_MAP.get(sleep_key, ("23:00", "07:00"))
-    remember("sleep_time", sleep_time)
-    remember("wake_time", wake_time)
-
-    # Mark onboarding done
-    AIMemoryService.remember(user_id, "system", "onboarding_done", True, 1.0)
-
-    # Sync back to User model fields
-    try:
-        users = Storage.get_users()
-        user = next((u for u in users if u.id == user_id), None)
-        if user:
-            user.work_style = ws
-            user.preferred_work_duration = fd
-            user.break_duration = 10
-            user.sleep_time = sleep_time
-            user.wake_time = wake_time
-            user.peak_productivity_hours = json.dumps(peak_hours)
-            user.focus_hours = _WORKLOAD_MAP.get(answers.get("daily_workload", "moderate"), 5)
-            user.role = answers.get("role", "other")
-            user.work_env = "remote"
-            stress_map = {"low": "low", "medium": "medium", "high": "high"}
-            user.deadline_sensitivity = stress_map.get(
-                answers.get("stress_tolerance", "medium"), "medium"
-            )
-            Storage.save_user(user)
-    except Exception as e:
-        print(f"[Onboarding] Failed to sync user model: {e}")
+    users = Storage.get_users()
+    user = next((u for u in users if u.id == user_id), None)
+    if user is None:
+        raise ValueError("Không tìm thấy tài khoản để lưu hồ sơ.")
+    profile = dict((user.settings or {}).get('planning_profile', {}))
+    profile.update(answers)
+    user.settings = dict(user.settings or {}, planning_profile=profile)
+    field_map = {'role': 'role', 'work_style': 'work_style', 'focus_duration': 'preferred_work_duration'}
+    for key, field in field_map.items():
+        if key in answers:
+            setattr(user, field, answers[key])
+    if answers.get('sleep_schedule') in _SLEEP_MAP:
+        user.sleep_time, user.wake_time = _SLEEP_MAP[answers['sleep_schedule']]
+    if answers.get('peak_time') in _PEAK_HOUR_MAP:
+        user.peak_productivity_hours = json.dumps(_PEAK_HOUR_MAP[answers['peak_time']])
+    Storage.save_user(user)
+    AIMemoryService.remember(user_id, 'preference', 'planning_profile', profile, 1.0)
+    for key, value in answers.items():
+        AIMemoryService.remember(user_id, 'preference', key, value, 1.0)
+    AIMemoryService.remember(user_id, 'system', 'onboarding_done', True, 1.0)
+    from utils.ai_helper import invalidate_context_cache
+    invalidate_context_cache(user_id)
 
 
 # ── Screen builder ────────────────────────────────────────────────────────────
@@ -187,10 +152,11 @@ def build_onboarding_screen(page: ft.Page, user, on_complete):
     """
     on_complete(): called when user finishes or skips onboarding.
     """
-    state = {"step": 0, "answers": {}}
+    stored_profile = AIMemoryService.recall_value(user.id, 'preference', 'planning_profile')
+    state = {"step": 0, "answers": dict(stored_profile if isinstance(stored_profile, dict) else (user.settings or {}).get("planning_profile", {}))}
 
     step_indicator = ft.Row([], spacing=4, alignment=ft.MainAxisAlignment.CENTER)
-    content_area   = ft.Column([], expand=True)
+    content_area   = ft.Column([], expand=True, scroll=ft.ScrollMode.AUTO)
 
     def _update_indicators():
         total = len(_STEPS)
@@ -209,6 +175,22 @@ def build_onboarding_screen(page: ft.Page, user, on_complete):
         step = _STEPS[idx]
         selected = {"v": state["answers"].get(step["key"])}
 
+        def extra_answer(e, key):
+            value = e.control.value.strip()
+            if value:
+                state['answers'][key] = value
+            else:
+                state['answers'].pop(key, None)
+
+        extra = ft.Column([
+            ft.TextField(label="Lịch cố định và thời gian có thể làm việc (tùy chọn)",
+                         hint_text="Ví dụ: học 8–11h thứ 2–6, rảnh chiều thứ 3",
+                         value=state['answers'].get('availability', ''), multiline=True,
+                         on_change=lambda e: extra_answer(e, 'availability')),
+            ft.TextField(label="Thời gian cần giữ riêng / ràng buộc khác (tùy chọn)",
+                         value=state['answers'].get('constraints', ''), multiline=True,
+                         on_change=lambda e: extra_answer(e, 'constraints')),
+        ], visible=idx == len(_STEPS)-1)
         option_controls = ft.Ref[ft.Column]()
 
         def _select(value):
@@ -233,10 +215,6 @@ def build_onboarding_screen(page: ft.Page, user, on_complete):
         btn_label = "Bắt đầu!" if is_last else "Tiếp theo"
 
         def _next(_):
-            if selected["v"] is None:
-                # Auto-select first option if nothing chosen
-                _select(step["options"][0]["value"])
-                return
             if is_last:
                 _finish()
             else:
@@ -266,8 +244,12 @@ def build_onboarding_screen(page: ft.Page, user, on_complete):
                 padding=ft.padding.symmetric(vertical=Spacing.MD),
             ),
             opts_col,
+            extra,
+            error,
             ft.Container(height=Spacing.MD),
-            primary_button(btn_label, on_click=_next, height=48),
+            ft.FilledButton(btn_label, on_click=_next, height=48, style=ft.ButtonStyle(bgcolor=Colors.PRIMARY, color=Colors.TEXT_ON_PRIMARY)),
+            ft.TextButton("Bỏ qua câu này", on_click=lambda e: _skip_step(idx)),
+            ft.TextButton("Quay lại", disabled=idx == 0, on_click=lambda e: _back()),
         ], spacing=0, tight=True)
 
     def _option_card(opt: dict, selected_val, on_select):
@@ -296,16 +278,32 @@ def build_onboarding_screen(page: ft.Page, user, on_complete):
             animate=ft.Animation(150, ft.AnimationCurve.EASE_OUT),
         )
 
+    error = ft.Text('', color=Colors.ERROR)
+
+    def _skip_step(idx):
+        state['answers'].pop(_STEPS[idx]['key'], None)
+        if idx == len(_STEPS) - 1:
+            _finish()
+        else:
+            state['step'] += 1
+            _render()
+
+    def _back():
+        state['step'] = max(0, state['step'] - 1)
+        _render()
+
     def _finish():
         try:
             survey_to_ai_memory(user.id, state["answers"])
         except Exception as e:
-            print(f"[Onboarding] Error: {e}")
+            error.value = "Chưa lưu được hồ sơ. Câu trả lời vẫn được giữ; hãy thử lại."
+            page.update()
+            return
+        user.settings = next((u.settings for u in Storage.get_users() if u.id == user.id), user.settings)
         on_complete()
 
     def _skip(_):
-        AIMemoryService.remember(user.id, "system", "onboarding_done", True, 1.0)
-        on_complete()
+        _finish()
 
     def _render():
         _update_indicators()
@@ -334,7 +332,7 @@ def build_onboarding_screen(page: ft.Page, user, on_complete):
                 ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 ft.Container(height=4),
                 ft.Text(
-                    "Trả lời 8 câu hỏi nhanh để AI hiểu bạn ngay từ đầu.",
+                    "Giúp Doumar hiểu bạn. Bạn có thể bỏ qua từng câu và bổ sung sau.",
                     size=Typography.SMALL, color=Colors.TEXT_MUTED,
                 ),
                 ft.Container(height=Spacing.SM),

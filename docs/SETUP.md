@@ -28,6 +28,16 @@ TASKFLOW_ALLOW_LOCAL_API=1
 
 Đây là API thật với tài khoản do người dùng tự đăng ký, không có tài khoản mẫu hoặc cơ chế cấp gói thử. Không bật cho phép HTTP cục bộ khi kết nối máy chủ công khai. Không cấu hình API thì đăng ký/đăng nhập chỉ lưu trên máy.
 
+Chủ bản cài có thể cấp quyền admin và toàn bộ chức năng Pro cho một tài khoản cục bộ đã tồn tại:
+
+```bash
+python scripts/manage_admin.py --username admin
+# Thu hồi nếu cần:
+python scripts/manage_admin.py --username admin --revoke
+```
+
+Lệnh giữ nguyên mật khẩu và dữ liệu, không tạo giao dịch thanh toán. Giao diện ghi rõ `Admin · Quyền chủ ứng dụng`. Quyền này không được xuất, khôi phục hay đồng bộ theo workspace; chỉ áp dụng khi desktop không cấu hình API. Tài khoản đồng bộ vẫn cần quyền do máy chủ xác nhận. Các dịch vụ AI/OAuth/thanh toán vẫn cần cấu hình kết nối thật.
+
 Token tài khoản được giữ trong bộ nhớ và kho thông tin xác thực của hệ điều hành nếu có. Nếu kho hệ điều hành không khả dụng, người dùng cần đăng nhập lại khi mở app. Không phân phối token dùng chung.
 
 ## 2. MySQL / MariaDB và XAMPP

@@ -55,39 +55,26 @@ def _build_context(user_id: str) -> str:
 
     sections = []
 
-    # ── [USER PROFILE] — từ bảng users + ai_memory ───────────────
-    profile_lines = ["[USER PROFILE]"]
-    if user:
-        full_name = getattr(user, "full_name", "") or getattr(user, "username", "")
-        if full_name:
-            profile_lines.append(f"Tên: {full_name}")
-        role_val = (AIMemoryService.recall_value(user_id, "preference", "role")
-                    or getattr(user, "role", ""))
-        if role_val:
-            profile_lines.append(f"Vai trò: {role_val}")
-        work_style = (AIMemoryService.recall_value(user_id, "preference", "work_style")
-                      or getattr(user, "work_style", "balanced"))
-        profile_lines.append(f"Phong cách làm việc: {work_style}")
-        wstart = getattr(user, "work_start", "08:00")
-        wend   = getattr(user, "work_end",   "18:00")
-        profile_lines.append(f"Giờ làm việc: {wstart}–{wend}")
-        sleep_t = getattr(user, "sleep_time", "23:00")
-        wake_t  = getattr(user, "wake_time",  "07:00")
-        profile_lines.append(f"Thói quen ngủ: ngủ {sleep_t}, dậy {wake_t}")
-        focus_dur = getattr(user, "preferred_work_duration", 50)
-        break_dur = getattr(user, "break_duration", 10)
-        profile_lines.append(f"Thời lượng focus tối ưu: {focus_dur} phút (nghỉ {break_dur} phút)")
-        main_goal = (AIMemoryService.recall_value(user_id, "goal", "main_goal")
-                     or AIMemoryService.recall_value(user_id, "preference", "main_goal"))
-        if main_goal:
-            profile_lines.append(f"Mục tiêu chính: {main_goal}")
-    else:
-        profile_lines.append("Chưa có thông tin hồ sơ")
-    sections.append("\n".join(profile_lines))
+    from zoneinfo import ZoneInfo
+    from datetime import datetime
+    import json
+    zone = getattr(user, "timezone", None) or "Asia/Ho_Chi_Minh"
+    now = datetime.now(ZoneInfo(zone))
+    today_str = now.date().isoformat()
+    sections.append(f"[ACCOUNT TIME] {now.isoformat()} | múi giờ: {zone}")
+    profile = AIMemoryService.recall_value(user_id, 'preference', 'planning_profile')
+    if not isinstance(profile, dict):
+        profile = (user.settings or {}).get("planning_profile", {}) if user else {}
+    sections.append("[USER PROFILE — tự khai, đã xác nhận]\n" + json.dumps(profile, ensure_ascii=False))
+    sections.append("Các câu chưa có trong hồ sơ là chưa biết. Các bộ nhớ khác có thể là suy luận cũ; không coi là sở thích đã xác nhận.")
+    from core.workspace import Workspace
+    from core.task_focus import TaskFocus
+    sections.append("[CURRENT FOCUS TARGET — người dùng chủ động chọn]\n" + json.dumps(TaskFocus.current(user_id), ensure_ascii=False))
+    sections.append("[SAVED CALENDAR — lịch đã lưu, không tự dời]\n" + json.dumps(Workspace.blocks(user_id), ensure_ascii=False))
 
     # ── [CURRENT STATE] — từ ai_memory (check-in) + user_behavior ─
     state_lines = ["[CURRENT STATE]"]
-    peak_hours = BehaviorService.get_peak_hours(user_id)
+    peak_hours = BehaviorService.get_peak_hours(user_id) if sessions else []
     productivity_score = BehaviorService.get_productivity_score(user_id)
     peak_str = ", ".join(f"{h:02d}h" for h in peak_hours) if peak_hours else "chưa xác định"
 
@@ -99,18 +86,18 @@ def _build_context(user_id: str) -> str:
         getattr(user, "energy_level", 7) if user else 7)
     stress_val = int(live_stress) if live_stress is not None else (
         getattr(user, "stress_level", 5) if user else 5)
-    energy_src = "check-in" if live_energy is not None else "ước tính"
-    stress_src = "check-in" if live_stress is not None else "ước tính"
+    energy_src = "ước tính chưa xác nhận"
+    stress_src = "ước tính chưa xác nhận"
 
     energy_bar = "▓" * energy_val + "░" * (10 - energy_val)
     stress_bar = "▓" * stress_val  + "░" * (10 - stress_val)
-    state_lines.append(f"Năng lượng [{energy_bar}] {energy_val}/10 ({energy_src})")
-    state_lines.append(f"Stress      [{stress_bar}] {stress_val}/10 ({stress_src})")
+    state_lines.append(f"Năng lượng: {energy_val}/10 ({energy_src})" if live_energy is not None else "Năng lượng: chưa biết")
+    state_lines.append(f"Áp lực: {stress_val}/10 ({stress_src})" if live_stress is not None else "Mức áp lực: chưa biết")
     if live_mood is not None:
         mood_labels = {1: "rất tệ", 2: "tệ", 3: "bình thường", 4: "tốt", 5: "tuyệt vời"}
         state_lines.append(f"Tâm trạng: {mood_labels.get(int(live_mood), str(live_mood))}")
     state_lines.append(f"Năng suất tuần: {productivity_score:.0f}/100")
-    state_lines.append(f"Giờ vàng: {peak_str}")
+    state_lines.append(f"Khung giờ quan sát chưa xác nhận: {peak_str}")
     # AI rule hints based on live state
     if energy_val <= 3:
         state_lines.append("⚠ NĂNG LƯỢNG THẤP → chỉ gợi ý task nhẹ, không push việc khó")
@@ -174,7 +161,7 @@ def _build_context(user_id: str) -> str:
 
         if peak_hours:
             hours_str = ", ".join(f"{h}:00" for h in sorted(peak_hours)[:4])
-            habits_lines.append(f"Giờ vàng (học được): {hours_str}")
+            habits_lines.append(f"Xu hướng giờ hoạt động (chưa xác nhận): {hours_str}")
 
         delay_patterns = BehaviorLearner.learn_delay_patterns(events)
         if delay_patterns:
@@ -182,7 +169,7 @@ def _build_context(user_id: str) -> str:
             worst_cats = [c for c, v in sorted_delays[:2] if v > 0]
             if worst_cats:
                 habits_lines.append(
-                    f"Category hay trì hoãn: {', '.join(worst_cats)} → AI sẽ tự chia nhỏ")
+                    f"Category hay trì hoãn: {', '.join(worst_cats)} → có thể đề xuất chia nhỏ, chờ xác nhận")
 
         completed_sessions = [s for s in sessions
                                if isinstance(s, dict) and s.get("duration_minutes", 0) > 0]
@@ -243,8 +230,12 @@ def _build_context(user_id: str) -> str:
 
     # ── [AI MEMORY] — từ bảng ai_memory ──────────────────────────
     memory_text = AIMemoryService.get_context_summary(user_id)
-    sections.append(f"[AI MEMORY]\n{memory_text}" if memory_text
+    sections.append(f"[AI MEMORY — có thể chứa suy luận chưa xác nhận]\n{memory_text}" if memory_text
                     else "[AI MEMORY]\nChưa có bộ nhớ AI nào được lưu")
+    memories = Storage.get_memory(user_id)
+    sections.append("[ACCOUNT MEMORIES — loại, độ tin cậy và nguồn cần được phân biệt]\n" +
+                    json.dumps([{k: m.get(k) for k in ('memory_type', 'key', 'value', 'confidence', 'updated_at')}
+                                for m in memories if m.get('memory_type') in ('preference', 'habit', 'pattern', 'goal', 'constraint', 'profile', 'state', 'performance', 'project')][:80], ensure_ascii=False))
 
     return "\n\n".join(sections)
 
@@ -267,111 +258,8 @@ def invalidate_context_cache(user_id: str):
 
 
 def _get_system_prompt(context: str) -> str:
-    from datetime import datetime
-    now = datetime.now()
-    hour = now.hour
-    greeting = (
-        "Chào buổi sáng" if 5 <= hour < 12
-        else "Chào buổi chiều" if 12 <= hour < 18
-        else "Chào buổi tối" if 18 <= hour < 22
-        else "Đêm khuya rồi"
-    )
-    return f"""Bạn là **Doumar** — trợ lý năng suất AI cá nhân của TaskFlow.
-Thời gian hiện tại: {now.strftime('%H:%M, %A %d/%m/%Y')} ({greeting})
-
-━━━ DỮ LIỆU NGƯỜI DÙNG (từ SQL Server) ━━━
-{context}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-## DANH TÍNH & PHONG CÁCH
-
-Bạn là Doumar — trợ lý cá nhân thông minh, thực tế, không vòng vo.
-Giọng điệu: chuyên nghiệp nhưng gần gũi, thẳng thắn, đôi khi hài hước nhẹ.
-Ngôn ngữ: Tiếng Việt tự nhiên — không cứng nhắc, không robot.
-
-## QUY TẮC ĐỊNH DẠNG — BẮT BUỘC
-
-**Độ dài:** Tối đa 120 từ. Chỉ viết dài hơn khi user hỏi phân tích cụ thể.
-
-**Cấu trúc chuẩn cho mọi câu trả lời:**
-```
-[1 dòng tóm tắt — nêu thẳng vấn đề hoặc kết luận chính]
-
-• [Hành động / thông tin 1]
-• [Hành động / thông tin 2]
-• [Hành động / thông tin 3 — nếu cần]
-```
-
-**Quy tắc bôi đậm:**
-- `**tên task**` — luôn bôi đậm tên task
-- `**HH:MM**` — giờ cụ thể
-- `**X ngày**`, `**X%**`, `**X/10**` — con số quan trọng
-- `**→ hành động**` — bước cần làm ngay
-
-**Dấu hiệu trực quan:**
-- 🔴 quá hạn / khẩn cấp  |  🟡 sắp đến  |  🟢 ổn
-- ⚡ cần năng lượng cao  |  💤 nhẹ nhàng  |  🎯 focus
-- ✅ đã xong  |  ⚠️ cảnh báo  |  💡 gợi ý
-
-## CÁ NHÂN HÓA — BẮT BUỘC SỬ DỤNG DỮ LIỆU
-
-Luôn đọc [CURRENT STATE] và [LEARNED HABITS] trong dữ liệu người dùng và áp dụng:
-
-- **Năng lượng ≤ 3/10** → chỉ gợi ý task nhẹ (💤 low energy), tuyệt đối không push task khó
-- **Stress ≥ 7/10** → thêm gợi ý nghỉ ngơi 5–10 phút, giảm áp lực, không tạo danh sách dài
-- **Task cần energy cao (⚡⚡)** → xếp vào giờ vàng của người dùng
-- **Category hay trì hoãn** → tự động đề xuất chia nhỏ thành bước ≤30 phút
-- **Khi gợi ý hoặc lên kế hoạch** → giải thích ngắn 1 câu tại sao (vd: "vì đây là giờ vàng của bạn")
-- **Đêm khuya (01:00–04:00)** → khuyên nghỉ ngơi ngay, không gợi ý làm thêm việc
-
-## LOGIC ƯU TIÊN
-
-Khi gợi ý task, áp dụng theo thứ tự:
-1. Task quá hạn → xử lý NGAY
-2. Task hôm nay + AI Score cao
-3. Task phù hợp với năng lượng hiện tại của user
-4. Task sắp đến hạn (≤3 ngày)
-
-## CÁC TÌNH HUỐNG ĐẶC BIỆT
-
-**Khi user hỏi "làm gì bây giờ":**
-→ Nêu đúng 2-3 task ưu tiên nhất. Nếu năng lượng thấp, chỉ task nhẹ.
-
-**Khi user hỏi phân tích / báo cáo:**
-→ Có thể dùng thêm headers (##) và bảng nếu cần. Tối đa 200 từ.
-
-**Khi user hỏi câu đơn giản:**
-→ Trả lời 1-2 câu. Không thêm bullet points nếu không cần thiết.
-
-## LÊN KẾ HOẠCH — QUY TẮC BẮT BUỘC
-
-Khi user yêu cầu lên kế hoạch:
-
-**LUÔN tạo kế hoạch nháp ngay** dựa trên thông tin hiện có — không hỏi trước rồi mới làm.
-Nếu thiếu thông tin (địa điểm, ngân sách, v.v.) → ghi rõ vào phần "Giả định".
-Kế hoạch phải cá nhân hóa: xếp task khó vào giờ vàng, task nhẹ lúc năng lượng thấp.
-Sau kế hoạch → hỏi ĐÚNG 1 câu ngắn để tinh chỉnh (không hỏi nhiều câu hỏi).
-Cuối kế hoạch giải thích ngắn: "Đã dựa trên [giờ vàng/năng lượng/thói quen] của bạn".
-
-Format kế hoạch chuẩn:
-```
-🗓️ [Tiêu đề kế hoạch]
-💡 Giả định: [liệt kê nếu thiếu thông tin]
-
-[Giờ/Bước] — [Hoạt động cụ thể]
-...
-
-📌 Dựa trên: [thói quen/dữ liệu đã dùng]
-```
-
-## CẤM TUYỆT ĐỐI
-
-✗ Không mở đầu bằng "Xin chào!", "Chắc chắn rồi!", "Tuyệt vời!" hay các cụm sáo rỗng
-✗ Không nhắc lại toàn bộ danh sách task — chỉ nêu những gì liên quan
-✗ Không giải thích điều user đã biết
-✗ Không kết thúc bằng "Hãy cho tôi biết nếu bạn cần thêm gì!"
-✗ Không dùng tiếng Anh trừ tên riêng hoặc thuật ngữ kỹ thuật
-✗ Không chỉ hỏi lại câu hỏi rồi dừng — phải tạo kế hoạch nháp trước dù thiếu thông tin"""
+    from core.ai_policy import chat_instruction
+    return chat_instruction(context)
 
 
 def _is_retryable(err_str: str) -> bool:
@@ -388,6 +276,9 @@ def _is_quota_error(err_str: str) -> bool:
 
 def _call_gemini(client, model: str, contents, sys_prompt: str):
     """Gọi Gemini API với một model cụ thể."""
+    from core.ai_policy import DOUMAR_POLICY
+    if not sys_prompt.startswith(DOUMAR_POLICY):
+        sys_prompt = DOUMAR_POLICY + '\n\n' + sys_prompt
     config = types.GenerateContentConfig(
         system_instruction=sys_prompt,
         # Keep interactive requests responsive with a supported Gemini 3 setting.

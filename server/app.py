@@ -359,8 +359,14 @@ class Application:
         if data.get('image'):
             if plan != 'pro' or feature != 'ai_images' or data.get('mime') not in ('image/png', 'image/jpeg', 'image/webp'):
                 raise APIError(403, 'Phân tích ảnh cần gói Pro và ảnh PNG/JPEG/WebP.')
-            if len(base64.b64decode(data['image'], validate=True)) > 4 * 1024 * 1024:
+            raw_image = base64.b64decode(data['image'], validate=True)
+            if len(raw_image) > 4 * 1024 * 1024:
                 raise APIError(413, 'Ảnh vượt giới hạn 4 MB.')
+            from server.ai import validate_image
+            try:
+                validate_image(raw_image, data['mime'])
+            except ValueError as exc:
+                raise APIError(400, str(exc)) from exc
         period = datetime.now(timezone.utc).strftime('%Y-%m')
         with self.store.connect(lock='usage:' + uid + ':' + period) as db:
             row = db.execute('SELECT count FROM usage WHERE account=? AND period=?', (uid, period)).fetchone()
